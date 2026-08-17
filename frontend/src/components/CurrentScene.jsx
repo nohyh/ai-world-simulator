@@ -32,6 +32,7 @@ export default function CurrentScene() {
   const place = pendingMeta?.place || lastTurn?.meta?.place || ''
 
   const applyHistory = (payload, { readyForChoice = false } = {}) => {
+    requestRef.current = null
     setHistory(payload)
     const last = payload?.turns?.[payload.turns.length - 1]
     if (!last) {
@@ -173,19 +174,52 @@ export default function CurrentScene() {
     await runSSE(`/api/game/${worldId}/action`, { input: action }, turnCount(history))
   }
 
-  const retryRequest = () => {
+  const retryRequest = async () => {
+    if (submittingRef.current) return
     const request = recoveryRequest || requestRef.current
-    if (request) runSSE(request.url, request.body, request.historyTurnCount)
-    else runSSE(`/api/game/${worldId}/start`, {}, turnCount(history))
+    if (!request) {
+      submittingRef.current = true
+      await runSSE(`/api/game/${worldId}/start`, {}, turnCount(history))
+      return
+    }
+
+    // Invalidate the old failure reconciliation before checking again. If the
+    // original request committed just after its first failure, this prevents
+    // retrying the same action and creating a duplicate turn.
+    requestRef.current = null
+    setRecoveryRequest(null)
+    setError('')
+    submittingRef.current = true
+    try {
+      const latest = await fetchJson(`/api/game/${worldId}/history`)
+      if (turnCount(latest) > request.historyTurnCount) {
+        applyHistory(latest, { readyForChoice: true })
+        setError('')
+        bumpWorlds()
+        submittingRef.current = false
+        return
+      }
+    } catch (event) {
+      setBusy(false)
+      setError(event.message || '无法确认本回合状态')
+      setRecoveryRequest(request)
+      submittingRef.current = false
+      return
+    }
+    await runSSE(request.url, request.body, request.historyTurnCount)
   }
 
   const restorePrevious = async () => {
+    const request = recoveryRequest || requestRef.current
+    requestRef.current = null
+    setRecoveryRequest(null)
     try {
       const payload = await fetchJson(`/api/game/${worldId}/history`)
       applyHistory(payload, { readyForChoice: turnCount(payload) > 0 })
       setError('')
     } catch (event) {
       setError(event.message || '无法恢复上一回合')
+      if (request) setRecoveryRequest(request)
     }
   }
 

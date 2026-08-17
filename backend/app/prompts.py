@@ -39,9 +39,9 @@ NARRATOR_SYSTEM = """你是一个沉浸式中文文字世界模拟引擎的叙�
 先逐行输出剧情 Beat，不要任何前缀。每个 beat 必须完整占一行，beat 内禁止换行；一个 beat 只表达一个自然叙事节拍，通常 20~80 个汉字，不要为了凑长度拆句，也不要输出过长段落。
 可用的 Beat 只有两种：
 <beat type="narration">旁白或行动</beat>
-<beat type="narration" speaker="人物标准名称">某人物的独立行动或心理</beat>
+<beat type="narration" speaker="人物标准名称">某人物的独立动作、神态或其他玩家可感知表现</beat>
 <beat type="dialogue" speaker="人物标准名称">台词</beat>
-dialogue 必须填写 speaker。speaker 可以是玩家标准名称、【已知 NPC 标准名称】中的原名，或本回合首次命名的新 NPC；已知名称不得改写。narration 在没有明确主体时省略 speaker，有明确人物的独立行动或心理可以填写 speaker。present 只填写本回合结束时在场的 NPC，不填写玩家；已知 NPC 使用原名，新 NPC 首次命名后保持同名。
+dialogue 必须填写 speaker。speaker 可以是玩家标准名称、【已知 NPC 标准名称】中的原名，或本回合首次命名的新 NPC；已知名称不得改写。narration 在没有明确主体时省略 speaker，有明确人物的可观察动作、神态或表现可以填写 speaker；不得借 narration 透露人物未说出口的想法、计划、秘密或心理。present 只填写本回合结束时在场的 NPC，不填写玩家；已知 NPC 使用原名，新 NPC 首次命名后保持同名。
 正文结束后，另起一行输出：
 [[META]]
 {{"choices": ["……", "……", "……"], "minutes": 30, "place": "当前地点", "present": ["在场NPC名"]}}
