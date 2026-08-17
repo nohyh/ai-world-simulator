@@ -1,0 +1,21 @@
+# 依赖第三方库的都放各自子目录
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+venv/
+backend/data/
+*.db
+.DS_Store
+
+# Local reference repositories used during research; they are not project code.
+ai-town/
+project-lunar/
+SillyTavern/
+
+# Local agent/browser output.
+.agents/
+.claude/
+.playwright-cli/
+output/

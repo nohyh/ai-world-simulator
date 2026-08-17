@@ -1,0 +1,302 @@
+"""Game Orchestrator：唯一的回合循环。
+
+玩家行动 → 读世界状态 → 读记忆窗口 → 组装上下文 → 主 LLM（流式正文+结尾结构化块）
+→ 更新状态与事件库 → 异步副作用（NPC 心智 / 属性物品 / 世界推进 / 记忆结晶）→ 等待玩家。
+
+同步路径只有 1 次 LLM 调用（决策 #3/#5）；副作用全部走辅助便宜模型。
+"""
+import asyncio
+
+from . import config as C
+from . import prompts
+from .llm import LLMClient, LLMConfig
+from .memory_engine import MemoryEngine, _loads
+from . import npc_mind, world_reactor
+from .world_state import WorldState
+
+_sessions: dict = {}
+
+_MODEL_KEYS = ("provider", "base_url", "api_key", "model", "aux_model", "temperature")
+
+
+def resolve_llm_config(db, world_cfg):
+    """全局设置 + 世界级覆盖（新世界不再存模型配置，始终跟随全局设置）。"""
+    merged = dict(db.get_settings() or {})
+    for k in _MODEL_KEYS:
+        if world_cfg.get(k):
+            merged[k] = world_cfg[k]
+    return merged
+
+
+def get_session(world_id, world_row, db):
+    s = _sessions.get(world_id)
+    if s is None:
+        s = GameSession(world_id, world_row, db)
+        _sessions[world_id] = s
+    return s
+
+
+def drop_session(world_id):
+    _sessions.pop(world_id, None)
+
+
+def drop_all_sessions():
+    _sessions.clear()
+
+
+class GameSession:
+    def __init__(self, world_id, world_row, db):
+        self.world_id = world_id
+        self.db = db
+        self.config = world_row["config"]
+        self.llm = LLMClient(LLMConfig(resolve_llm_config(db, self.config)))
+        self.state = WorldState.rebuild(db.get_events(world_id), self.config)
+        self.mem = MemoryEngine(self.state.crystals)
+        self._side_tasks: list[asyncio.Task] = []
+
+    # ================= 对外：开篇 =================
+    async def ensure_opening(self):
+        """SSE 生成器：若已有回合则直接结束，否则生成开篇。"""
+        if self.state.turns:
+            yield {"type": "done", "history": self._history_payload()}
+            return
+        if not self.config.get("npc_cards"):
+            await self._parse_npc_cards()
+        await self._drain_side_effects()
+
+        msgs = [
+            {"role": "system", "content": self._narrator_system()},
+            {"role": "user", "content": prompts.opening_user_message(
+                self.config.get("world_setting") or "",
+                self.config.get("world_rules") or "",
+                self.config.get("tone") or "",
+                self.state.player,
+                self._npc_cards_desc(),
+                self.state.display_time(),
+                situation=self.config.get("current_situation") or "",
+                notes=self.config.get("custom_notes") or "")},
+        ]
+        async for ev in self._run_narrator(msgs):
+            yield ev
+        meta = self._last_meta
+        turn = {"player_action": None, "narrative": self._last_prose, "meta": meta}
+        self._commit_turn(turn)
+        self.config["_has_opening"] = True
+        self.db.save_world_config(self.world_id, self.config)
+        self._schedule_side_effects(turn)
+        yield {"type": "done", "history": self._history_payload()}
+
+    # ================= 对外：玩家行动 =================
+    async def process_action(self, action):
+        action = (action or "").strip()
+        if not action:
+            yield {"type": "error", "message": "行动不能为空"}
+            return
+        await self._drain_side_effects()
+        if not self.state.turns and not self.config.get("_has_opening"):
+            yield {"type": "error", "message": "世界尚未开局，请先调用 start"}
+            return
+
+        self.state.decay_feelings()
+        msgs = [
+            {"role": "system", "content": self._narrator_system()},
+            {"role": "user", "content": self._narrator_user(action)},
+        ]
+        async for ev in self._run_narrator(msgs):
+            yield ev
+        meta = self._last_meta
+        turn = {"player_action": action, "narrative": self._last_prose, "meta": meta}
+        self._commit_turn(turn)
+        self.db.touch_world(self.world_id)
+        self._schedule_side_effects(turn)
+        yield {"type": "done", "history": self._history_payload()}
+
+    # ================= 叙事主调用 =================
+    async def _run_narrator(self, messages):
+        """流式产出 {"type":"delta"} 与最终 {"type":"meta"}；结果同时暂存到 self._last_*。"""
+        self._last_prose = ""
+        self._last_meta = None
+        buf = ""
+        meta_mode = False
+        meta_raw = ""
+        async for delta in self.llm.stream_chat(messages):
+            buf += delta
+            if meta_mode:
+                meta_raw += delta
+                continue
+            idx = buf.find(C.META_SENTINEL)
+            if idx >= 0:
+                prose = buf[:idx]
+                if prose:
+                    self._last_prose += prose
+                    yield {"type": "delta", "text": prose}
+                meta_mode = True
+                meta_raw = buf[idx + len(C.META_SENTINEL):]
+                buf = ""
+            else:
+                safe = len(buf) - (len(C.META_SENTINEL) - 1)
+                if safe > 0:
+                    prose = buf[:safe]
+                    self._last_prose += prose
+                    yield {"type": "delta", "text": prose}
+                    buf = buf[safe:]
+        if not meta_mode:
+            # 没有哨兵：残余全部当正文（模型没按格式输出的兜底）
+            if buf:
+                self._last_prose += buf
+                yield {"type": "delta", "text": buf}
+        else:
+            meta = prompts.extract_meta(C.META_SENTINEL + meta_raw)
+            self._last_meta = prompts.normalize_meta(
+                meta, self.state.place, list(self.state.present))
+        if not self._last_prose.strip():
+            self._last_prose = "（世界陷入了奇异的沉默……请重试一次。）"
+            yield {"type": "delta", "text": self._last_prose}
+            self._last_meta = prompts.normalize_meta(None, self.state.place, list(self.state.present))
+        yield {"type": "meta", "meta": self._last_meta}
+
+    # ================= 异步副作用 =================
+    def _schedule_side_effects(self, turn):
+        self._side_tasks.append(asyncio.create_task(self._side_effects(turn)))
+
+    async def _drain_side_effects(self, timeout=90):
+        tasks = [t for t in self._side_tasks if not t.done()]
+        self._side_tasks = []
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=timeout)
+            self._side_tasks = list(pending)  # 未完成的下次继续等，不取消
+
+    async def _side_effects(self, turn):
+        try:
+            action = turn["player_action"] or "（冒险开始）"
+            narrative = turn["narrative"]
+            present = turn["meta"].get("present") or []
+
+            # 1) NPC 心智 + 属性/物品变化
+            updates, plot_advanced, attr_changes, item_changes = await npc_mind.update_minds(
+                self.llm, self.state.npcs, present, action, narrative,
+                self.state.player["attrs"])
+            if updates:
+                self._append("NPC_STATE", {"npcs": updates})
+            if attr_changes:
+                self._append("ATTR_CHANGE", {"changes": attr_changes})
+            if item_changes.get("add") or item_changes.get("remove"):
+                self._append("ITEM_CHANGE", item_changes)
+            if plot_advanced:
+                self._append("PLOT_PROGRESS", {})
+
+            # 2) 世界推进（时间跳跃）
+            minutes = int(turn["meta"].get("minutes") or 0)
+            if minutes >= C.WORLD_TICK_MIN_MINUTES:
+                tick = await world_reactor.world_tick(
+                    self.llm, minutes, self.state.main_plot,
+                    self.state.tick_summary(), self.state.world_threads)
+                if tick.get("developments") or tick.get("plot_pressure"):
+                    self._append("WORLD_TICK", tick)
+
+            # 3) 记忆结晶
+            events = await self.mem.crystallize(self.llm, self.state.pending_crystal_turns)
+            for etype, data in events:
+                self._append(etype, data)
+        except Exception:
+            pass  # 副作用失败不阻断游戏
+
+    # ================= 上下文组装 =================
+    def _narrator_system(self):
+        rules = self.config.get("world_rules") or "（无特殊规则）"
+        notes = self.config.get("custom_notes")
+        if notes:
+            rules += "\n【用户补充设定（与世界规则同等效力）】\n" + notes
+        return prompts.NARRATOR_SYSTEM.format(
+            world_setting=self.config.get("world_setting") or "（自由世界）",
+            world_rules=rules,
+            tone=self.config.get("tone") or "（默认：沉浸、克制、有张力）",
+        )
+
+    def _narrator_user(self, action):
+        st = self.state
+        # 记忆检索：查询 = 玩家行动 + 最近两回合的叙事
+        query = action + " " + " ".join(
+            t["narrative"][:200] for t in st.recent_turns(2))
+        mem_segments = self.mem.build_context(query, st.present)
+        mem_block = prompts.memory_block(mem_segments)
+
+        pressure = st.plot_pressure
+        if st.turns_since_plot >= C.PLOT_PRESSURE_TURNS and st.main_plot:
+            pressure = (pressure + " " if pressure else "") + \
+                       f"主线已经 {st.turns_since_plot} 回合无实质推进，必须开始主动介入。"
+
+        return prompts.narrator_user_message(
+            prompts.state_block(st.player, st.npcs, st.display_time(), st.place, st.present),
+            mem_block,
+            prompts.thread_block(st.main_plot, pressure, st.world_threads),
+            prompts.history_block(st.recent_turns()),
+            action,
+        )
+
+    def _npc_cards_desc(self):
+        lines = []
+        for n, v in self.state.npcs.items():
+            lines.append(f"- {n}：{v['identity']}；与玩家关系：{v['relationship']}")
+        return "\n".join(lines) or "（无初始人物，请根据世界设定自行安排）"
+
+    # ================= 持久化与杂项 =================
+    async def _parse_npc_cards(self):
+        try:
+            raw = await self.llm.chat(
+                [{"role": "system", "content": prompts.NPC_CARDS_SYSTEM},
+                 {"role": "user", "content": prompts.npc_cards_user_message(
+                     self.config.get("world_setting") or "", self.config.get("important_people") or "")}],
+                aux=True, max_tokens=1200)
+            obj = _loads(raw) or {}
+            cards = obj.get("npcs") or []
+            if isinstance(cards, list) and cards:
+                self.config["npc_cards"] = [c for c in cards if isinstance(c, dict) and c.get("name")]
+            if isinstance(obj.get("main_plot"), str) and obj["main_plot"].strip():
+                self.config["main_plot"] = obj["main_plot"].strip()[:200]
+            self.db.save_world_config(self.world_id, self.config)
+            self.state = WorldState.rebuild(self.db.get_events(self.world_id), self.config)
+            self.mem = MemoryEngine(self.state.crystals)
+        except Exception:
+            pass
+
+    def _turn_state_snapshots(self):
+        """Rebuild the public state at the end of each explored turn.
+
+        Events after a turn (NPC, inventory, world and memory side effects) are
+        included up to the next TURN boundary, so the UI can inspect a node's
+        state without exposing private NPC fields.
+        """
+        events = self.db.get_events(self.world_id)
+        turn_positions = [i for i, (etype, _data) in enumerate(events) if etype == "TURN"]
+        snapshots = []
+        for i, _position in enumerate(turn_positions):
+            end = turn_positions[i + 1] if i + 1 < len(turn_positions) else len(events)
+            state = WorldState.rebuild(events[:end], self.config)
+            snapshots.append(state.drawer_snapshot())
+        return snapshots
+
+    def _commit_turn(self, turn):
+        self._append("TURN", turn)
+
+    def _append(self, etype, data):
+        seq = self.db.append_event(self.world_id, etype, data)
+        self.state.apply(etype, data)
+        return seq
+
+    def _history_payload(self):
+        snapshots = self._turn_state_snapshots()
+        turns = [{
+            "player_action": t["player_action"],
+            "narrative": t["narrative"],
+            "meta": t["meta"],
+            "time_display": t["time_display"],
+            "attr_changes": dict(t.get("attr_changes") or {}),
+            "item_changes": t.get("item_changes") or {"add": [], "remove": []},
+            "state_after": snapshots[i] if i < len(snapshots) else None,
+        } for i, t in enumerate(self.state.turns)]
+        return {
+            "turns": turns,
+            "state": self.state.drawer_snapshot(),
+            "initial_attrs": dict((self.config.get("player") or {}).get("attrs") or {}),
+        }
