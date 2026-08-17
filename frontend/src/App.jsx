@@ -24,7 +24,7 @@ function EmptyMain() {
           <span className="folder-icon"><Icon name="folder" size={16} /></span> 新建一个世界 <span className="chevron"><Icon name="chevronDown" size={13} /></span>
         </button>
         <button className="hero-composer" onClick={() => openModal('create')}>
-          <span className="hero-placeholder">描述你想要探索的世界</span>
+          <span className="hero-placeholder">描述一个你想进入的世界</span>
           <span className="hero-composer-row">
             <span className="composer-plus"><Icon name="plus" size={16} />
             </span>

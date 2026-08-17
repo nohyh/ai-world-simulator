@@ -25,7 +25,7 @@ export default function HistoryTab() {
       <div className="history-wrap">
         <div className="history-heading">
           <div>
-            <div className="history-kicker mono">BACKLOG</div>
+            <div className="history-kicker mono">剧情</div>
             <h1>剧情记录</h1>
           </div>
           <span className="history-count mono">{turns ? `${turns.length} 回合` : '读取中'}</span>
