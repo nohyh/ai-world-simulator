@@ -18,6 +18,7 @@ function fmtTime(ts) {
 export default function Sidebar() {
   const { worldId, sidebarCollapsed, selectWorld, toggleSidebar, openModal, worldsRev, bumpWorlds, settingsHint } = useStore()
   const [worlds, setWorlds] = useState(null)
+  const immersive = Boolean(worldId)
 
   useEffect(() => {
     fetchJson('/api/worlds').then(setWorlds).catch(() => setWorlds([]))
@@ -32,7 +33,11 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+    <>
+      {immersive && !sidebarCollapsed && (
+        <button className="drawer-scrim" type="button" aria-label="关闭世界抽屉" onClick={toggleSidebar} />
+      )}
+      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${immersive ? 'world-drawer' : ''}`}>
       <div className="sidebar-head">
         {sidebarCollapsed ? (
           <button className="icon-btn collapsed-toggle" title="展开" onClick={toggleSidebar}>
@@ -41,7 +46,7 @@ export default function Sidebar() {
         ) : (
           <>
             <div className="brand">
-              <span className="brand-title">世界模拟器</span>
+              <span className="brand-title">{immersive ? '世界' : '世界模拟器'}</span>
             </div>
             <button className="icon-btn" title="收起" onClick={toggleSidebar}>
               <Icon name="panel" size={16} />
@@ -97,6 +102,7 @@ export default function Sidebar() {
           <span className="gear"><Icon name="settings" size={17} /></span>{!sidebarCollapsed && <span>设置{settingsHint ? ' · 未配置' : ''}</span>}
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }

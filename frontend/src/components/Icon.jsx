@@ -1,4 +1,5 @@
 const PATHS = {
+  menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
   plus: <path d="M12 5v14M5 12h14" />,
   search: <><circle cx="10.8" cy="10.8" r="5.8" /><path d="m16 16 4 4" /></>,
   sliders: <><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="9" cy="6" r="1.8" fill="currentColor" stroke="none" /><circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none" /><circle cx="11" cy="18" r="1.8" fill="currentColor" stroke="none" /></>,
