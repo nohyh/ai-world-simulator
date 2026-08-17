@@ -71,7 +71,7 @@ function NodeDetail({ turn, index, onClose }) {
   )
 }
 
-/** 世界树：展示已探索回合，并把未选择的选项渲染为不可进入的迷雾节点。 */
+/** 剧情树：展示已探索回合，并把未选择的选项渲染为不可进入的迷雾节点。 */
 export default function EventTreeTab() {
   const worldId = useStore((s) => s.worldId)
   const [data, setData] = useState(null)
@@ -86,7 +86,7 @@ export default function EventTreeTab() {
   }, [worldId])
 
   if (error) return <div className="page-pad"><div className="error">{error}</div></div>
-  if (!data) return <div className="page-pad sidebar-hint">载入世界树……</div>
+  if (!data) return <div className="page-pad sidebar-hint">载入剧情树……</div>
 
   const { turns, state } = data
   const selected = selectedIndex === null ? null : turns[selectedIndex]

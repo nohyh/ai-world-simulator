@@ -1,5 +1,5 @@
 from app.db import Database
-from app.routes import WorldCreate, _auto_title
+from app.routes import WorldCreate, _auto_title, _infer_player_fields
 
 
 def test_settings_roundtrip(tmp_path):
@@ -23,3 +23,8 @@ def test_auto_title():
     assert _auto_title(wc(setting="\n\n   \n第二行世界")) == "第二行世界"
     # 全空回退
     assert _auto_title(wc(setting="。。。")) in ("新世界", "。")
+
+
+def test_player_description_infers_name_and_identity():
+    assert _infer_player_fields("林默，23岁，避难所侦察员，擅长追踪。") == (
+        "林默", "避难所侦察员")

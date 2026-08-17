@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from './store.js'
 import { fetchJson } from './api.js'
-import DshFishLogo from './components/DshFishLogo.jsx'
 import Icon from './components/Icon.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import TopBar from './components/TopBar.jsx'
@@ -17,9 +16,7 @@ function EmptyMain() {
     <div className="empty-main">
       <div className="hero-stack">
         <div className="hero-title">
-          <DshFishLogo size={34} />
           <span>探索未至之境</span>
-          <span className="preview-badge">预览版</span>
         </div>
         <button className="hero-workspace" onClick={() => openModal('create')}>
           <span className="folder-icon"><Icon name="folder" size={16} /></span> 新建一个世界 <span className="chevron"><Icon name="chevronDown" size={13} /></span>

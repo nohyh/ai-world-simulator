@@ -40,11 +40,35 @@ def get_session(world_id, world_row, db):
 
 
 def drop_session(world_id):
-    _sessions.pop(world_id, None)
+    session = _sessions.pop(world_id, None)
+    if session is None:
+        return
+    session._closed = True
+    loop = getattr(session, "_loop", None)
+    if not loop or not loop.is_running():
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+    if loop and loop.is_running():
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(session.close()))
+        return
+    try:
+        asyncio.run(session.close())
+    except RuntimeError:
+        logger.warning("Could not synchronously close session %s", world_id, exc_info=True)
+
+
+async def close_session(world_id):
+    """Awaitable cleanup used by destructive API routes before deleting a world."""
+    session = _sessions.pop(world_id, None)
+    if session is not None:
+        await session.close()
 
 
 def drop_all_sessions():
-    _sessions.clear()
+    for world_id in list(_sessions):
+        drop_session(world_id)
 
 
 class GameSession:
@@ -57,6 +81,8 @@ class GameSession:
         self.mem = MemoryEngine(self.state.crystals)
         self._side_tasks: list[asyncio.Task] = []
         self._turn_lock = asyncio.Lock()
+        self._loop = None
+        self._closed = False
 
     # ================= 对外：开篇 =================
     async def ensure_opening(self):
@@ -173,7 +199,23 @@ class GameSession:
 
     # ================= 异步副作用 =================
     def _schedule_side_effects(self, turn):
+        if self._closed:
+            logger.warning("Skipping side effects for closed session %s", self.world_id)
+            return
+        self._loop = asyncio.get_running_loop()
         self._side_tasks.append(asyncio.create_task(self._side_effects(turn)))
+
+    async def close(self):
+        """Stop pending side effects before a session/world is discarded."""
+        self._closed = True
+        tasks = list(self._side_tasks)
+        self._side_tasks = []
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await self.llm.close()
 
     async def _drain_side_effects(self, timeout=90):
         tasks = []
@@ -235,10 +277,14 @@ class GameSession:
                 tick = await world_reactor.world_tick(
                     self.llm, pending_minutes, self.state.main_plot,
                     self.state.tick_summary(), self.state.world_threads, self.state.npcs)
-                # 即使 LLM 没生成可见变化，也必须记录消费事件，否则同一
-                # 段时间会在下一回合被重复推进。
-                tick["minutes"] = pending_minutes
-                self._append("WORLD_TICK", tick)
+                if not tick.get("ok", True):
+                    logger.warning("World tick did not complete; retaining %s pending minutes",
+                                   pending_minutes)
+                else:
+                    # 即使 LLM 没生成可见变化，也必须记录消费事件，否则同一
+                    # 段时间会在下一回合被重复推进。
+                    tick["minutes"] = pending_minutes
+                    self._append("WORLD_TICK", tick)
         except Exception:
             logger.exception("World tick side effect failed")
 
@@ -272,8 +318,10 @@ class GameSession:
             pressure = (pressure + " " if pressure else "") + \
                        f"主线已经 {st.turns_since_plot} 回合无实质推进，必须开始主动介入。"
 
+        knowledge = {name: st.npc_knowledge_window(name)
+                     for name in st.present if name in st.npcs}
         state_text = prompts.state_block(
-            st.player, st.npcs, st.display_time(), st.place, st.present)
+            st.player, st.npcs, st.display_time(), st.place, st.present, knowledge)
         thread_text = prompts.thread_block(st.main_plot, pressure, st.world_threads)
         fixed_chars = len(state_text) + len(thread_text) + len(action) + 180
         available = max(0, C.CONTEXT_BUDGET_CHARS - fixed_chars)
@@ -338,6 +386,9 @@ class GameSession:
         self._append("TURN", turn)
 
     def _append(self, etype, data):
+        if self._closed:
+            logger.warning("Ignoring %s event for closed world %s", etype, self.world_id)
+            return None
         seq = self.db.append_event(self.world_id, etype, data)
         self.state.apply(etype, data)
         return seq

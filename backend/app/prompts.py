@@ -28,7 +28,7 @@ NARRATOR_SYSTEM = """你是一个沉浸式中文文字世界模拟引擎的叙�
 1. 只用中文写作，第二人称"你"指代玩家。禁止出戏、禁止任何 meta 说明、禁止罗列选项之外的分析。
 2. 后果是真实的。玩家的输入只是一次【尝试】：他想做什么由他决定，实际发生什么由世界状态、他的能力、资源与环境决定。玩家说"我造火箭飞去月球"，你要按一个资源匮乏的普通人试图造火箭来演绎后果，而不是让他成功。
 3. 玩家属性是成败倾向的依据（属性见状态块），但不显式引用数字。力量 20 的人搬不动巨石，魅力高的人更容易说服他人。
-4. NPC 是活人：他们有自己的目标、情绪与秘密，会主动说话和行动，不等玩家推动才存在。但每个 NPC 只能引用他自己可能知道的信息（各 NPC 状态块中【可知】标注的范围），绝不泄露他不可能知道的事。
+4. NPC 是活人：他们有自己的目标、情绪与秘密，会主动说话和行动，不等玩家推动才存在。但每个 NPC 只能引用他自己可能知道的信息（各 NPC 状态块中【可知】标注的范围），绝不泄露他不可能知道的事。近期历史、长期记忆和世界暗流是叙事者上下文，不代表任何 NPC 自动知道；写 NPC 台词或行动时只能使用该 NPC 的【可知】范围。
 5. 篇幅自适应：快节奏的动作往来可以只有一两句话甚至十几个字；重要对话、场景转换、剧情推进可以写二三百字。总体宁精勿滥。
 6. 保持既有事实的连续性，不得与记忆、历史、状态冲突。专名（人名、地名、组织名）永远保持原样。
 7. 世界有内在压力：若【主线压力】提示存在，务必让它以合理方式渗入剧情，但不必每回合都直白展现。
@@ -54,7 +54,7 @@ def narrator_user_message(state_block, memory_block, thread_block, history_block
 请推进剧情。"""
 
 
-def state_block(player, npcs, time_display, place, present):
+def state_block(player, npcs, time_display, place, present, knowledge_by_npc=None):
     attrs = "，".join(f"{k} {v}" for k, v in player["attrs"].items())
     items = "、".join(player["key_items"]) if player["key_items"] else "无"
     lines = [
@@ -64,6 +64,7 @@ def state_block(player, npcs, time_display, place, present):
         f"玩家属性：{attrs or '无'}",
         f"关键物品：{items}",
     ]
+    knowledge_by_npc = knowledge_by_npc or {}
     if present:
         lines.append("在场 NPC：")
         for name in present:
@@ -71,11 +72,13 @@ def state_block(player, npcs, time_display, place, present):
             if not n:
                 continue
             pub = f"身份：{n['identity']}；性格：{n['personality']}；与玩家关系：{n['relationship']}"
+            known = knowledge_by_npc.get(name) or "（没有目击到更早的相关事件；只能使用本回合亲历内容）"
             priv = (f"【仅叙事者可知，玩家与其它 NPC 不可知】此刻心理：{n['feeling'] or '不明'}；"
                     f"目标：{n['goal'] or '不明'}；对玩家看法：{n['opinion_of_player'] or '不明'}；"
                     f"秘密计划：{n['secret_plan'] or '无'}")
             lines.append(f"- {name}：{pub}")
-            lines.append(f"  {priv}")
+            lines.append(f"  【{name} 可知的历史】\n  {known}")
+            lines.append(f"  【私有心智，仅叙事者可见】{priv}")
     else:
         lines.append("在场 NPC：无（独处）")
     return "\n".join(lines)

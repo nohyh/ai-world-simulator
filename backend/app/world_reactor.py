@@ -49,7 +49,7 @@ async def world_tick(llm, minutes, main_plot, state_summary, threads, npcs=None)
         obj = _loads(raw) or {}
     except Exception:
         logger.exception("World tick failed")
-        return {"developments": [], "plot_pressure": "", "npc_updates": {}}
+        return {"ok": False, "developments": [], "plot_pressure": "", "npc_updates": {}}
     devs = [str(d).strip()[:120] for d in (obj.get("developments") or []) if str(d).strip()][:3]
     pressure = str(obj.get("plot_pressure") or "").strip()[:120]
     npc_updates = {}
@@ -64,4 +64,4 @@ async def world_tick(llm, minutes, main_plot, state_summary, threads, npcs=None)
                 update[key] = value.strip()[:120]
         if update:
             npc_updates[name] = update
-    return {"developments": devs, "plot_pressure": pressure, "npc_updates": npc_updates}
+    return {"ok": True, "developments": devs, "plot_pressure": pressure, "npc_updates": npc_updates}

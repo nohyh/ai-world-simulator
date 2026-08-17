@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchJson } from '../api.js'
 import { useStore } from '../store.js'
-import DshFishLogo from './DshFishLogo.jsx'
 import Icon from './Icon.jsx'
 
 function fmtTime(ts) {
@@ -37,15 +36,12 @@ export default function Sidebar() {
       <div className="sidebar-head">
         {sidebarCollapsed ? (
           <button className="icon-btn collapsed-toggle" title="展开" onClick={toggleSidebar}>
-            <DshFishLogo size={24} className="rail-logo" />
-            <Icon name="panel" size={18} className="panel-hover" />
+            <Icon name="panel" size={18} />
           </button>
         ) : (
           <>
             <div className="brand">
-              <DshFishLogo size={24} />
               <span className="brand-title">世界模拟器</span>
-              <span className="brand-badge">STORY</span>
             </div>
             <button className="icon-btn" title="收起" onClick={toggleSidebar}>
               <Icon name="panel" size={16} />

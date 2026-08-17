@@ -38,13 +38,11 @@ async def update_minds(llm, npcs, present, action, narrative, player_attrs,
     信息隔离：只把每个 NPC 自己目击过的回合喂给他（由调用方提供 can_know 文本）。
     """
     names = [n for n in present if n in npcs][:C.MAX_NPC_UPDATE]
-    if not names:
-        return {}, False, "", {}, {"add": [], "remove": []}
     knowledge_by_npc = knowledge_by_npc or {}
     sections = "\n\n".join(
         npc_section(n, npcs[n], knowledge_by_npc.get(n, "（本回合在场，亲历了当前剧情）"))
         for n in names
-    )
+    ) or "（当前无 NPC 在场；只判断玩家属性、物品和主线是否变化）"
     try:
         raw = await llm.chat(
             [{"role": "system", "content": prompts.NPC_MIND_SYSTEM},
@@ -58,7 +56,7 @@ async def update_minds(llm, npcs, present, action, narrative, player_attrs,
 
     updates = {}
     for name, fields in (obj.get("npcs") or {}).items():
-        if name not in npcs or not isinstance(fields, dict):
+        if name not in names or not isinstance(fields, dict):
             continue
         upd = {}
         for key in ("feeling", "goal", "opinion_of_player", "secret_plan"):

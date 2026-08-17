@@ -39,8 +39,30 @@ async def test_pending_and_crystal_flow():
 
     events = await eng.crystallize(FakeLLM(), turns)
     # 4 条正好一个 short batch，不触发级联
-    assert ("CRYSTAL", {"layer": "short", "crystal": eng.crystals["short"][0]}) in events
-    assert len(eng.crystals["short"]) == 1
+    assert len(events) == 1 and events[0][0] == "CRYSTAL"
+    assert eng.crystals["short"] == []
+
+
+async def test_crystallize_does_not_mutate_shared_world_crystals():
+    from app.world_state import WorldState
+
+    shared = {"short": [], "medium": [], "long": [], "permanent": []}
+    eng = MemoryEngine(shared)
+    turns = [{"player_action": f"行动{i}", "narrative": f"剧情{i}", "meta": {}}
+             for i in range(4)]
+
+    class FakeLLM:
+        async def chat(self, messages, aux=False, temperature=None, max_tokens=None):
+            return '{"summary":"A","key_events":[],"characters":[],"world_facts":[]}'
+
+    events = await eng.crystallize(FakeLLM(), turns)
+    assert shared["short"] == []
+
+    state = WorldState({"player": {"attrs": {}}, "npc_cards": []})
+    for etype, data in events:
+        state.apply(etype, data)
+    assert len(shared["short"]) == 0
+    assert len(state.crystals["short"]) == 1
 
 
 def test_memory_context_respects_character_budget():

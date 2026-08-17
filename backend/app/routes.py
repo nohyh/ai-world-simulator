@@ -1,5 +1,6 @@
 """API 路由：世界 CRUD + 游戏 SSE。"""
 import json
+import re
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -7,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from . import config as C
 from .db import Database
-from .game_session import get_session, drop_session, drop_all_sessions
+from .game_session import get_session, close_session, drop_all_sessions
 
 router = APIRouter(prefix="/api")
 db: Database = None  # main.py 启动时注入
@@ -59,6 +60,39 @@ def _auto_title(body: WorldCreate) -> str:
     return "新世界"
 
 
+def _infer_player_fields(description: str) -> tuple[str, str]:
+    """Extract lightweight name/identity hints from the required free-text field.
+
+    The player description remains the canonical background. This parser only
+    prevents the UI's intentionally simple form from silently producing the
+    default "旅人" card when the user starts with a name such as "林默".
+    """
+    text = (description or "").strip()
+    if not text:
+        return "", ""
+    parts = [p.strip() for p in re.split(r"[\n，,。；;、]+", text) if p.strip()]
+    name = ""
+    match = re.search(r"(?:姓名|名字|名叫)\s*[:：]?\s*([^，,。；;\n]{1,20})", text)
+    if match:
+        name = match.group(1).strip()
+    elif parts:
+        first = re.sub(r"^(?:我叫|我是|叫)\s*", "", parts[0]).strip()
+        if 1 <= len(first) <= 16 and not re.search(r"\s", first):
+            name = first
+
+    identity = ""
+    for part in parts:
+        explicit = re.search(r"(?:身份|职业)\s*[:：]?\s*(.+)", part)
+        if explicit:
+            identity = explicit.group(1).strip()
+            break
+        if (len(part) <= 32 and not re.search(r"\d+\s*岁", part)
+                and any(word in part for word in ("侦察员", "医生", "猎人", "法师", "工程师", "队长", "教师", "学生", "骑士", "官员"))):
+            identity = part
+            break
+    return name[:40], identity[:80]
+
+
 # ---------------- 世界 ----------------
 @router.get("/worlds")
 def list_worlds():
@@ -67,6 +101,13 @@ def list_worlds():
 
 @router.post("/worlds")
 def create_world(body: WorldCreate):
+    inferred_name, inferred_identity = _infer_player_fields(body.player_background)
+    player_name = body.player_name.strip() if body.player_name else ""
+    player_identity = body.player_identity.strip() if body.player_identity else ""
+    if not player_name or player_name == "旅人":
+        player_name = inferred_name or "旅人"
+    if not player_identity:
+        player_identity = inferred_identity
     cfg = {
         "world_setting": body.world_setting,
         "world_rules": body.world_rules,
@@ -77,8 +118,8 @@ def create_world(body: WorldCreate):
         "start_place": body.start_place,
         "important_people": body.important_people,
         "player": {
-            "name": body.player_name or "旅人",
-            "identity": body.player_identity,
+            "name": player_name,
+            "identity": player_identity,
             "background": body.player_background,
             "attrs": {k: max(0, min(100, v)) for k, v in body.attrs.items()},
             "key_items": [],
@@ -100,10 +141,10 @@ def get_world(wid: str):
 
 
 @router.delete("/worlds/{wid}")
-def delete_world(wid: str):
+async def delete_world(wid: str):
     if not db.get_world(wid):
         raise HTTPException(404, "世界不存在")
-    drop_session(wid)
+    await close_session(wid)
     db.delete_world(wid)
     return {"ok": True}
 

@@ -104,6 +104,11 @@ class MemoryEngine:
     async def crystallize(self, llm, raw_turns_since_cursor):
         """short 层结晶 + 逐层级联。返回新增事件列表（由调用方持久化）。"""
         events = []
+        # MemoryEngine is a planner, not a state owner. Work on a projected
+        # copy so the event store remains the only writer of real crystals.
+        projected = {layer: list(values) for layer, values in self.crystals.items()}
+        for layer in ("short", "medium", "long", "permanent"):
+            projected.setdefault(layer, [])
         if len(raw_turns_since_cursor) < C.CRYSTAL_INTERVAL:
             return events
         batch = raw_turns_since_cursor[:C.CRYSTAL_INTERVAL]
@@ -114,26 +119,26 @@ class MemoryEngine:
             items.append(f"玩家：{act}\n剧情：{t.get('narrative', '')}\n（地点：{meta.get('place', '')}）")
         crystal = await self._compress(llm, items, "short")
         if crystal:
-            self.crystals.setdefault("short", []).append(crystal)
+            projected["short"].append(crystal)
             events.append(("CRYSTAL", {"layer": "short", "crystal": crystal}))
-        events.extend(await self._cascade(llm))
+        events.extend(await self._cascade(llm, projected))
         return events
 
-    async def _cascade(self, llm):
+    async def _cascade(self, llm, projected):
         events = []
         for src, dst in (("short", "medium"), ("medium", "long"), ("long", "permanent")):
             need = True
-            while need and len(self.crystals.get(src, [])) >= C.CASCADE_BATCH:
-                batch = self.crystals[src][-C.CASCADE_BATCH:]
+            while need and len(projected.get(src, [])) >= C.CASCADE_BATCH:
+                batch = projected[src][-C.CASCADE_BATCH:]
                 items = [_dumps(b) for b in batch]
                 merged = await self._compress(llm, items, dst)
                 if not merged:
                     break
-                self.crystals[src] = self.crystals[src][:-C.CASCADE_BATCH]
-                self.crystals.setdefault(dst, []).append(merged)
+                projected[src] = projected[src][:-C.CASCADE_BATCH]
+                projected.setdefault(dst, []).append(merged)
                 events.append(("CRYSTAL", {"layer": dst, "crystal": merged}))
                 events.append(("CRYSTAL_POP", {"layer": src, "count": C.CASCADE_BATCH}))
-                need = len(self.crystals[src]) >= C.CASCADE_BATCH
+                need = len(projected[src]) >= C.CASCADE_BATCH
         return events
 
     async def _compress(self, llm, items, layer):
