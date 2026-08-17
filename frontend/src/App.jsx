@@ -53,13 +53,11 @@ export default function App() {
       <main className="main">
         <TopBar />
         {worldId ? (
-          <>
-            <div className="tab-body">
-              {tab === 'story' && <StoryTab key={worldId} />}
-              {tab === 'tree' && <EventTreeTab key={worldId} />}
-              {tab === 'chars' && <CharactersTab key={worldId} />}
-            </div>
-          </>
+          <div className="tab-body">
+            <div className="tab-panel" hidden={tab !== 'story'}><StoryTab key={worldId} /></div>
+            <div className="tab-panel" hidden={tab !== 'tree'}><EventTreeTab key={worldId} /></div>
+            <div className="tab-panel" hidden={tab !== 'chars'}><CharactersTab key={worldId} /></div>
+          </div>
         ) : <div className="tab-body"><EmptyMain /></div>}
       </main>
       {modal === 'create' && <NewWorldModal />}

@@ -1,6 +1,8 @@
 import pytest
 
 from app import npc_mind, world_reactor
+from app.game_session import GameSession
+from app.world_state import WorldState
 
 pytestmark = pytest.mark.asyncio
 
@@ -16,7 +18,7 @@ async def test_npc_mind_still_updates_player_when_scene_is_empty():
     result = await npc_mind.update_minds(
         FakeLLM(), {}, [], "搜索废墟", "你找到了钥匙。", {"体质": 50}, "旧主线")
     assert result == (
-        {}, True, "主线已转向实验室线索", {"体质": -2},
+        {}, {}, True, "主线已转向实验室线索", {"体质": -2},
         {"add": ["实验室钥匙"], "remove": []},
     )
 
@@ -29,3 +31,18 @@ async def test_world_tick_failure_is_not_a_consumable_tick():
     result = await world_reactor.world_tick(
         FailingLLM(), 180, "主线", "状态", [], {})
     assert result["ok"] is False
+
+
+async def test_narrator_without_meta_gets_safe_fallback():
+    class ProseOnlyLLM:
+        async def stream_chat(self, messages):
+            yield "你推开门，房间里空无一人。"
+
+    session = object.__new__(GameSession)
+    session.llm = ProseOnlyLLM()
+    session.state = WorldState({"start_time": "2041年7月16日 08:00"})
+    events = [event async for event in session._run_narrator([])]
+    assert session._last_prose.startswith("你推开门")
+    assert isinstance(session._last_meta, dict)
+    assert events[-1]["type"] == "meta"
+    assert events[-1]["meta"]["choices"]

@@ -8,8 +8,25 @@ from datetime import datetime, timedelta
 from . import config as C
 
 
+def _npc_state(card):
+    try:
+        feeling_turn = int(card.get("feeling_turn") or -1)
+    except (TypeError, ValueError):
+        feeling_turn = -1
+    return {
+        "identity": card.get("identity") or "",
+        "personality": card.get("personality") or "",
+        "relationship": card.get("relationship") or "陌生",
+        "goal": card.get("goal") or "",
+        "secret_plan": card.get("secret_plan") or "",
+        "opinion_of_player": card.get("opinion_of_player") or "",
+        "feeling": card.get("feeling") or "",
+        "feeling_turn": feeling_turn,
+    }
+
+
 def parse_start_time(text):
-    """支持 '2041年7月16日 08:00'、ISO 格式；失败返回当前时间。"""
+    """支持中文日期和 ISO 格式；无效值使用稳定兜底，避免重建时漂移。"""
     if text:
         m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2}))?", str(text))
         if m:
@@ -23,7 +40,11 @@ def parse_start_time(text):
             return datetime.fromisoformat(str(text))
         except ValueError:
             pass
-    return datetime.now().replace(microsecond=0)
+    # New worlds persist a generated start_time at creation, and old worlds
+    # are migrated from created_at by GameSession. This final deterministic
+    # fallback prevents a malformed legacy config from changing every time
+    # the event stream is rebuilt.
+    return datetime(2000, 1, 1, 0, 0)
 
 
 class WorldState:
@@ -42,16 +63,7 @@ class WorldState:
             name = str(card.get("name") or "").strip()
             if not name:
                 continue
-            self.npcs[name] = {
-                "identity": card.get("identity") or "",
-                "personality": card.get("personality") or "",
-                "relationship": card.get("relationship") or "陌生",
-                "goal": card.get("goal") or "",
-                "secret_plan": card.get("secret_plan") or "",
-                "opinion_of_player": "",
-                "feeling": "",
-                "feeling_turn": -1,
-            }
+            self.npcs[name] = _npc_state(card)
         # Only characters the protagonist has encountered belong in the public
         # character view. `present` is emitted by each narrator turn and is the
         # existing witness signal used by the game state.
@@ -59,6 +71,9 @@ class WorldState:
         self.main_plot = config.get("main_plot") or ""
         self.plot_pressure = ""
         self.world_threads = []
+        self.world_tick_events = []
+        self.world_tick_count = 0
+        self._world_tick_crystal_cursor = 0
         self.turns = []           # {player_action, narrative, meta, time_display}
         self.time_minutes = 0
         self.world_tick_pending_minutes = 0
@@ -68,6 +83,7 @@ class WorldState:
         self.turns_since_plot = 0
         self.crystals = {"short": [], "medium": [], "long": [], "permanent": []}
         self._short_crystal_count = 0
+        self._turn_crystal_cursor = 0
         self.start_dt = parse_start_time(config.get("start_time"))
 
     # ---------------- 重建 ----------------
@@ -112,6 +128,14 @@ class WorldState:
                         npc[k] = v
                 if "feeling" in fields:
                     npc["feeling_turn"] = self.turn_count
+        elif etype == "NPC_ADD":
+            for name, card in (data.get("npcs") or {}).items():
+                name = str(name).strip()
+                if not name or name in self.npcs or not isinstance(card, dict):
+                    continue
+                self.npcs[name] = _npc_state(card)
+                if name in self.present:
+                    self.seen_npcs.add(name)
         elif etype == "ATTR_CHANGE":
             for k, d in (data.get("changes") or {}).items():
                 if k in self.player["attrs"]:
@@ -137,6 +161,13 @@ class WorldState:
             self.world_threads = (self.world_threads + list(data.get("developments") or []))[-5:]
             if data.get("plot_pressure"):
                 self.plot_pressure = data["plot_pressure"]
+            self.world_tick_count += 1
+            self.world_tick_events.append({
+                "minutes": consumed,
+                "developments": list(data.get("developments") or []),
+                "plot_pressure": data.get("plot_pressure") or "",
+                "npc_updates": dict(data.get("npc_updates") or {}),
+            })
             # Keep off-screen NPC progression in the same event as the tick,
             # so rebuilding after an interrupted side effect cannot lose it.
             for name, fields in (data.get("npc_updates") or {}).items():
@@ -156,6 +187,22 @@ class WorldState:
             layer = data.get("layer")
             if layer == "short":
                 self._short_crystal_count += 1
+                if "source_turn_count" in data:
+                    try:
+                        self._turn_crystal_cursor = max(
+                            self._turn_crystal_cursor, int(data.get("source_turn_count") or 0))
+                    except (TypeError, ValueError):
+                        pass
+                else:
+                    # Compatibility with crystals written before source
+                    # cursors were persisted.
+                    self._turn_crystal_cursor += C.CRYSTAL_INTERVAL
+                try:
+                    self._world_tick_crystal_cursor = max(
+                        self._world_tick_crystal_cursor,
+                        int(data.get("source_world_tick_count") or 0))
+                except (TypeError, ValueError):
+                    pass
             self.crystals.setdefault(layer, []).append(data.get("crystal") or {})
         elif etype == "CRYSTAL_POP":
             layer = data.get("layer")
@@ -172,8 +219,11 @@ class WorldState:
 
     @property
     def pending_crystal_turns(self):
-        start = self._short_crystal_count * C.CRYSTAL_INTERVAL
-        return self.turns[start:]
+        return self.turns[self._turn_crystal_cursor:]
+
+    @property
+    def pending_crystal_world_ticks(self):
+        return self.world_tick_events[self._world_tick_crystal_cursor:]
 
     def decay_feelings(self):
         for npc in self.npcs.values():

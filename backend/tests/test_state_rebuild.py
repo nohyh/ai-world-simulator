@@ -64,6 +64,19 @@ def test_rebuild_side_effect_events():
     assert snap["world"]["chronicle"] == ["开篇与地图"]
 
 
+def test_new_npc_event_persists_and_exposes_seen_character():
+    st = WorldState.rebuild([
+        ("TURN", {"narrative": "陌生女人走进房间。",
+                  "meta": {"minutes": 1, "present": ["苏晴"]}}),
+        ("NPC_ADD", {"npcs": {
+            "苏晴": {"identity": "调查员", "personality": "谨慎",
+                     "relationship": "陌生", "goal": "寻找线索"}
+        }}),
+    ], CONFIG)
+    assert st.npcs["苏晴"]["identity"] == "调查员"
+    assert {n["name"] for n in st.drawer_snapshot()["character"]["npcs"]} == {"苏晴"}
+
+
 def test_pending_crystal_turns_tracks_cursor():
     events = [("TURN", {"player_action": f"a{i}", "narrative": "n", "meta": {}}) for i in range(5)]
     events.append(("CRYSTAL", {"layer": "short", "crystal": {"summary": "s"}}))
@@ -87,6 +100,18 @@ def test_world_tick_accumulates_and_consumes_narrative_minutes():
     })
     assert st.world_tick_pending_minutes == 0
     assert st.npcs["陈医生"]["goal"] == "赶往北岭"
+
+
+def test_world_tick_cursor_survives_memory_crystal():
+    st = WorldState.rebuild([
+        ("WORLD_TICK", {"minutes": 60, "developments": ["王城沦陷"]}),
+    ], CONFIG)
+    assert len(st.pending_crystal_world_ticks) == 1
+    st.apply("CRYSTAL", {
+        "layer": "short", "source_world_tick_count": 1,
+        "source_turn_count": 0, "crystal": {"summary": "王城沦陷"},
+    })
+    assert st.pending_crystal_world_ticks == []
 
 
 def test_npc_knowledge_window_only_contains_witnessed_turns():

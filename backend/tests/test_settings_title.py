@@ -1,5 +1,7 @@
 from app.db import Database
-from app.routes import WorldCreate, _auto_title, _infer_player_fields
+from datetime import datetime
+
+from app.routes import WorldCreate, _auto_title, _infer_player_fields, _normalize_start_time
 
 
 def test_settings_roundtrip(tmp_path):
@@ -28,3 +30,10 @@ def test_auto_title():
 def test_player_description_infers_name_and_identity():
     assert _infer_player_fields("林默，23岁，避难所侦察员，擅长追踪。") == (
         "林默", "避难所侦察员")
+
+
+def test_empty_start_time_is_materialized_once():
+    value = _normalize_start_time("")
+    parsed = datetime.fromisoformat(value)
+    assert parsed.second == 0 and parsed.microsecond == 0
+    assert _normalize_start_time("2041年7月16日 08:00") == "2041年7月16日 08:00"

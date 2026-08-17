@@ -1,6 +1,7 @@
 """API 路由：世界 CRUD + 游戏 SSE。"""
 import json
 import re
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -93,6 +94,28 @@ def _infer_player_fields(description: str) -> tuple[str, str]:
     return name[:40], identity[:80]
 
 
+def _normalize_start_time(value: str) -> str:
+    """Return a valid, persisted start time for new worlds."""
+    text = (value or "").strip()
+    if not text:
+        return datetime.now().replace(microsecond=0).isoformat(timespec="minutes")
+    try:
+        datetime.fromisoformat(text)
+        return text
+    except ValueError:
+        pass
+    match = re.fullmatch(
+        r"(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2}))?", text)
+    if match:
+        try:
+            datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)),
+                     int(match.group(4) or 9), int(match.group(5) or 0))
+            return text
+        except ValueError:
+            pass
+    return datetime.now().replace(microsecond=0).isoformat(timespec="minutes")
+
+
 # ---------------- 世界 ----------------
 @router.get("/worlds")
 def list_worlds():
@@ -114,7 +137,7 @@ def create_world(body: WorldCreate):
         "tone": body.tone,
         "current_situation": body.current_situation,
         "custom_notes": body.custom_notes,
-        "start_time": body.start_time,
+        "start_time": _normalize_start_time(body.start_time),
         "start_place": body.start_place,
         "important_people": body.important_people,
         "player": {

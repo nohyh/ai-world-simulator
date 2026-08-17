@@ -182,14 +182,19 @@ NPC_MIND_SYSTEM = """你是世界模拟器的后台状态更新器。MOCK:npcmin
 {
  "npcs": {
    "NPC名": {"feeling": "此刻情绪（短语）", "goal": "当前目标（可保持原值）",
-             "opinion_of_player": "对玩家的看法（短语）", "secret_plan": "秘密计划（可保持原值）"}
+             "opinion_of_player": "对玩家的看法（短语）", "relationship": "与玩家关系（有变化才填）",
+             "secret_plan": "秘密计划（可保持原值）"}
  },
+ "new_npcs": [
+   {"name": "本回合首次出现且在 present 中的 NPC", "identity": "身份", "personality": "性格",
+    "relationship": "与玩家关系", "goal": "目标", "secret_plan": "秘密计划；没有则留空"}
+ ],
  "main_plot_update": "如主线发生了可确认的实质变化，给出更新后的主线；没有变化则留空字符串",
  "plot_advanced": true/false,
  "player_attr_changes": {"属性名": +1 或 -2},
  "key_item_changes": {"add": ["获得的关键物品"], "remove": ["失去的关键物品"]}
 }
-规则：当前主线会在用户消息中明确给出。plot_advanced 仅当本回合主线有实质推进（获得关键信息/化解威胁/关系质变）才为 true；main_plot_update 只在主线表述需要更新时填写完整的新主线，否则留空；
+规则：当前主线会在用户消息中明确给出。plot_advanced 仅当本回合主线有实质推进（获得关键信息/化解威胁/关系质变）才为 true；main_plot_update 只在主线表述需要更新时填写完整的新主线，否则留空；new_npcs 只填写本回合确实首次出现、且 narrator 的 present 已列出的未知人物，不要凭空扩充人物表；
 属性变化只在显著事件时给出（长期训练、重伤、领悟），每次至多 2 项、幅度 ≤3；
 key_item 只记录对剧情有意义的物品（关键道具、信物、武器），不要记普通消耗品；
 没有变化就输出空对象，不要硬凑。"""

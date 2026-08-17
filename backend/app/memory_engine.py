@@ -101,7 +101,8 @@ class MemoryEngine:
         return segments
 
     # ---- 结晶 ----
-    async def crystallize(self, llm, raw_turns_since_cursor):
+    async def crystallize(self, llm, raw_turns_since_cursor, world_updates=None,
+                          source_turn_count=None, source_world_tick_count=None):
         """short 层结晶 + 逐层级联。返回新增事件列表（由调用方持久化）。"""
         events = []
         # MemoryEngine is a planner, not a state owner. Work on a projected
@@ -109,7 +110,8 @@ class MemoryEngine:
         projected = {layer: list(values) for layer, values in self.crystals.items()}
         for layer in ("short", "medium", "long", "permanent"):
             projected.setdefault(layer, [])
-        if len(raw_turns_since_cursor) < C.CRYSTAL_INTERVAL:
+        world_updates = list(world_updates or [])
+        if len(raw_turns_since_cursor) < C.CRYSTAL_INTERVAL and not world_updates:
             return events
         batch = raw_turns_since_cursor[:C.CRYSTAL_INTERVAL]
         items = []
@@ -117,10 +119,25 @@ class MemoryEngine:
             act = t.get("player_action") or "（开局）"
             meta = t.get("meta") or {}
             items.append(f"玩家：{act}\n剧情：{t.get('narrative', '')}\n（地点：{meta.get('place', '')}）")
+        for tick in world_updates:
+            developments = [str(item).strip() for item in tick.get("developments") or [] if str(item).strip()]
+            pressure = str(tick.get("plot_pressure") or "").strip()
+            if developments or pressure:
+                detail = "；".join(developments)
+                if pressure:
+                    detail += ("；" if detail else "") + f"主线压力：{pressure}"
+                items.append(f"离屏世界推进：{detail}")
+        if not items:
+            return events
         crystal = await self._compress(llm, items, "short")
         if crystal:
             projected["short"].append(crystal)
-            events.append(("CRYSTAL", {"layer": "short", "crystal": crystal}))
+            crystal_event = {"layer": "short", "crystal": crystal}
+            if source_turn_count is not None:
+                crystal_event["source_turn_count"] = source_turn_count
+            if source_world_tick_count is not None:
+                crystal_event["source_world_tick_count"] = source_world_tick_count
+            events.append(("CRYSTAL", crystal_event))
         events.extend(await self._cascade(llm, projected))
         return events
 

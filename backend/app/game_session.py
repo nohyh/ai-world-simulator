@@ -7,6 +7,7 @@
 """
 import asyncio
 import logging
+from datetime import datetime
 
 from . import config as C
 from . import prompts
@@ -76,6 +77,17 @@ class GameSession:
         self.world_id = world_id
         self.db = db
         self.config = world_row["config"]
+        # Migrate older worlds that were created before start_time became a
+        # persisted field. Derive it once from creation time, never from each
+        # subsequent rebuild.
+        if not self.config.get("start_time"):
+            created_at = world_row.get("created_at")
+            try:
+                start_dt = datetime.fromtimestamp(float(created_at)) if created_at else datetime.now()
+            except (TypeError, ValueError, OverflowError, OSError):
+                start_dt = datetime.now()
+            self.config["start_time"] = start_dt.replace(microsecond=0).isoformat(timespec="minutes")
+            self.db.save_world_config(self.world_id, self.config)
         self.llm = LLMClient(LLMConfig(resolve_llm_config(db, self.config)))
         self.state = WorldState.rebuild(db.get_events(world_id), self.config)
         self.mem = MemoryEngine(self.state.crystals)
@@ -194,6 +206,7 @@ class GameSession:
         if not self._last_prose.strip():
             self._last_prose = "（世界陷入了奇异的沉默……请重试一次。）"
             yield {"type": "delta", "text": self._last_prose}
+        if self._last_meta is None:
             self._last_meta = prompts.normalize_meta(None, self.state.place, list(self.state.present))
         yield {"type": "meta", "meta": self._last_meta}
 
@@ -239,9 +252,15 @@ class GameSession:
                     logger.warning("Side-effect task was cancelled")
                 except Exception:
                     logger.exception("Side-effect task failed")
-            self._side_tasks = list(pending)  # 未完成的下次继续等，不取消
             if pending:
-                logger.warning("%d side-effect task(s) still pending after %ss", len(pending), timeout)
+                # Do not let a slow provider task from turn N write events
+                # after turn N+1 has started.  The turn itself is already
+                # committed; a timed-out auxiliary effect is best-effort and
+                # must be cancelled at the boundary to preserve ordering.
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                logger.warning("Cancelled %d side-effect task(s) after %ss timeout", len(pending), timeout)
 
     async def _side_effects(self, turn):
         action = turn["player_action"] or "（冒险开始）"
@@ -253,10 +272,23 @@ class GameSession:
         try:
             knowledge = {name: self.state.npc_knowledge_window(name)
                          for name in present if name in self.state.npcs}
-            updates, plot_advanced, plot_update, attr_changes, item_changes = (
+            unknown_present = [name for name in present if name not in self.state.npcs]
+            npc_context = ""
+            if unknown_present:
+                npc_context = ("\n\n【本回合首次出现、待建立人物卡的名字】\n" +
+                               "、".join(unknown_present))
+            npc_sections = ("\n\n".join(
+                npc_mind.npc_section(
+                    name, self.state.npcs[name], knowledge.get(name, ""))
+                for name in present if name in self.state.npcs
+            ) or "（当前无已知 NPC 在场；只判断玩家属性、物品和主线是否变化）") + npc_context
+            updates, new_npcs, plot_advanced, plot_update, attr_changes, item_changes = (
                 await npc_mind.update_minds(
                     self.llm, self.state.npcs, present, action, narrative,
-                    self.state.player["attrs"], self.state.main_plot, knowledge))
+                    self.state.player["attrs"], self.state.main_plot, knowledge,
+                    npc_sections=npc_sections))
+            if new_npcs:
+                self._append("NPC_ADD", {"npcs": new_npcs})
             if updates:
                 self._append("NPC_STATE", {"npcs": updates})
             if attr_changes:
@@ -290,7 +322,18 @@ class GameSession:
 
         # 3) 记忆结晶
         try:
-            events = await self.mem.crystallize(self.llm, self.state.pending_crystal_turns)
+            pending_turns = self.state.pending_crystal_turns
+            pending_ticks = self.state.pending_crystal_world_ticks
+            source_turn_count = self.state._turn_crystal_cursor
+            if len(pending_turns) >= C.CRYSTAL_INTERVAL:
+                source_turn_count += C.CRYSTAL_INTERVAL
+            events = await self.mem.crystallize(
+                self.llm,
+                pending_turns,
+                pending_ticks,
+                source_turn_count=source_turn_count,
+                source_world_tick_count=self.state.world_tick_count,
+            )
             for etype, data in events:
                 self._append(etype, data)
         except Exception:
@@ -372,12 +415,22 @@ class GameSession:
         state without exposing private NPC fields.
         """
         events = self.db.get_events(self.world_id)
-        turn_positions = [i for i, (etype, _data) in enumerate(events) if etype == "TURN"]
+        state = WorldState(self.config)
         snapshots = []
-        for i, _position in enumerate(turn_positions):
-            end = turn_positions[i + 1] if i + 1 < len(turn_positions) else len(events)
-            state = WorldState.rebuild(events[:end], self.config)
-            snapshots.append(state.drawer_snapshot())
+        open_turn = None
+        for etype, data in events:
+            # Side effects belong to the preceding turn. Capture that state
+            # before applying the next TURN event, so each snapshot is built
+            # by one event-stream pass instead of rebuilding an ever-growing
+            # prefix for every turn.
+            if etype == "TURN" and open_turn is not None:
+                snapshots[open_turn] = state.drawer_snapshot()
+            state.apply(etype, data)
+            if etype == "TURN":
+                snapshots.append(None)
+                open_turn = len(snapshots) - 1
+        if open_turn is not None:
+            snapshots[open_turn] = state.drawer_snapshot()
         return snapshots
 
     def _commit_turn(self, turn):

@@ -65,6 +65,22 @@ async def test_crystallize_does_not_mutate_shared_world_crystals():
     assert len(state.crystals["short"]) == 1
 
 
+async def test_world_updates_can_crystallize_without_four_player_turns():
+    eng = MemoryEngine({"short": [], "medium": [], "long": [], "permanent": []})
+
+    class FakeLLM:
+        async def chat(self, messages, aux=False, temperature=None, max_tokens=None):
+            assert "离屏世界推进" in messages[-1]["content"]
+            return '{"summary":"王城已经沦陷","key_events":[],"characters":[],"world_facts":["王城沦陷"]}'
+
+    events = await eng.crystallize(
+        FakeLLM(), [], [{"developments": ["王城已经沦陷"]}],
+        source_turn_count=2, source_world_tick_count=1)
+    assert events[0][0] == "CRYSTAL"
+    assert events[0][1]["source_turn_count"] == 2
+    assert events[0][1]["source_world_tick_count"] == 1
+
+
 def test_memory_context_respects_character_budget():
     eng = MemoryEngine({
         "short": [], "medium": [], "long": [],
