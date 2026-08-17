@@ -17,8 +17,8 @@ export default function BeatPlayer({
   beats,
   serverDone,
   pendingMeta,
-  busy,
-  initialLoading,
+  loadingDots,
+  resumeAtEnd = false,
   enabled = true,
   onChoiceReady,
 }) {
@@ -38,15 +38,29 @@ export default function BeatPlayer({
       setAdvanceRequested(false)
       return
     }
+    if (resumeAtEnd) {
+      const lastBeat = normalizeBeat(beats[beats.length - 1])
+      setActiveIndex(beats.length - 1)
+      setVisibleCount(Array.from(lastBeat.text).length)
+      setAdvanceRequested(false)
+      return
+    }
     setActiveIndex((current) => (current < 0 ? 0 : current))
-  }, [beats.length])
+  }, [beats, resumeAtEnd])
 
   useEffect(() => {
-    if (!advanceRequested || activeIndex < 0 || activeIndex + 1 >= beats.length) return
-    setActiveIndex((current) => current + 1)
-    setVisibleCount(0)
-    setAdvanceRequested(false)
-  }, [advanceRequested, activeIndex, beats.length])
+    if (!advanceRequested || activeIndex < 0) return
+    if (activeIndex + 1 < beats.length) {
+      setActiveIndex((current) => current + 1)
+      setVisibleCount(0)
+      setAdvanceRequested(false)
+      return
+    }
+    if (serverDone && pendingMeta) {
+      setAdvanceRequested(false)
+      onChoiceReady(pendingMeta)
+    }
+  }, [advanceRequested, activeIndex, beats.length, serverDone, pendingMeta, onChoiceReady])
 
   useEffect(() => {
     if (!activeBeat || visibleCount >= characters.length) return undefined
@@ -80,6 +94,7 @@ export default function BeatPlayer({
     const handleKeyDown = (event) => {
       if (event.target.closest('button, textarea, input, select, a, [data-stop-advance]')) return
       if (event.key !== 'Enter' && event.key !== ' ') return
+      if (event.repeat) return
       event.preventDefault()
       requestAdvance()
     }
@@ -93,13 +108,7 @@ export default function BeatPlayer({
   }
 
   return (
-    <div className="vn-stage" onClick={handleStageClick} role="button" tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          requestAdvance()
-        }
-      }}>
+    <div className="vn-stage" onClick={handleStageClick} role="button" tabIndex={0}>
       <div className="vn-stage-spacer" />
       <div className={`vn-beat-frame ${activeBeat?.type === 'dialogue' ? 'dialogue' : 'narration'}`}>
         {activeBeat?.speaker && <div className="vn-speaker">{activeBeat.speaker}</div>}
@@ -111,7 +120,7 @@ export default function BeatPlayer({
         )}
         {revealed && activeBeat && <div className="vn-advance-mark">▼</div>}
       </div>
-      {(initialLoading || (busy && !activeBeat)) && <div className="vn-loading-dots">· · ·</div>}
+      {loadingDots && <div className="vn-loading-dots">· · ·</div>}
       {waitingForNext && <div className="vn-loading-dots vn-loading-dots-waiting">· · ·</div>}
     </div>
   )

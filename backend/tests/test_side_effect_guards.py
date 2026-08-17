@@ -33,6 +33,16 @@ async def test_world_tick_failure_is_not_a_consumable_tick():
     assert result["ok"] is False
 
 
+async def test_world_tick_invalid_json_is_not_a_consumable_tick():
+    class InvalidLLM:
+        async def chat(self, messages, **kwargs):
+            return "模型没有按要求返回 JSON"
+
+    result = await world_reactor.world_tick(
+        InvalidLLM(), 180, "主线", "状态", [], {})
+    assert result["ok"] is False
+
+
 async def test_world_tick_only_receives_offscreen_npcs():
     class FakeLLM:
         def __init__(self):

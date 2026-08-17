@@ -38,8 +38,31 @@ def test_invalid_lines_after_valid_beats_are_preserved_as_narration():
     ]
 
 
+def test_parser_accepts_unescaped_ampersands_and_multiple_beats_per_line():
+    parser = BeatStreamParser()
+    beats = parser.feed(
+        '<beat type="narration">A&B 已亮起。</beat><beat type="narration" '
+        'speaker="苏晴">她皱眉。</beat>\n'
+    )
+    assert beats == [
+        {"type": "narration", "speaker": None, "text": "A&B 已亮起。"},
+        {"type": "narration", "speaker": "苏晴", "text": "她皱眉。"},
+    ]
+
+
+def test_parser_ignores_malformed_beat_markup_after_valid_output():
+    parser = BeatStreamParser()
+    beats = parser.feed('<beat type="narration">先观察。</beat>\n')
+    beats += parser.feed('<beat type="narration">模型忘了闭合\n')
+    beats += parser.feed('真正的补充。\n')
+    assert beats == [
+        {"type": "narration", "speaker": None, "text": "先观察。"},
+        {"type": "narration", "speaker": None, "text": "真正的补充。"},
+    ]
+
+
 def test_beats_render_back_to_simulation_narrative():
     assert beats_to_prose([
-        {"type": "narration", "speaker": None, "text": "她抬头。"},
+        {"type": "narration", "speaker": "苏晴", "text": "她抬头。"},
         {"type": "dialogue", "speaker": "苏晴", "text": "不要开灯。"},
-    ]) == "她抬头。\n\n苏晴：不要开灯。"
+    ]) == "苏晴：她抬头。\n\n苏晴：不要开灯。"

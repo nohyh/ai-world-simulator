@@ -239,6 +239,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .vn-loading-dots { padding: 12px 0 0; color: var(--caption); letter-spacing: .18em; font-size: 13px; }
 .vn-loading-dots-waiting { position: absolute; right: 25px; bottom: 24px; padding: 0; }
 .scene-retry { width: min(500px, calc(100% - 40px)); display: flex; flex-direction: column; align-items: center; gap: 12px; margin: auto; }
+.scene-recovery { position: absolute; z-index: 7; top: 50%; left: 50%; width: min(500px, calc(100% - 40px)); display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px 24px; border: 1px solid var(--line); border-radius: 18px; background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: 0 18px 50px rgba(26, 32, 42, .14); text-align: center; transform: translate(-50%, -50%); }
+.scene-recovery-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .scene-inline-error { position: absolute; z-index: 5; right: 22px; bottom: 20px; margin: 0; }
 .choice-layer { position: absolute; z-index: 4; inset: 0; display: flex; align-items: center; justify-content: center; padding: 30px; background: rgba(25, 29, 35, .16); backdrop-filter: blur(3px); }
 .choice-panel { width: min(620px, 100%); padding: 25px 28px 22px; border: 1px solid rgba(255,255,255,.7); border-radius: 22px; background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: 0 24px 70px rgba(20, 27, 38, .18); }

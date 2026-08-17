@@ -4,6 +4,10 @@ import { useStore } from '../store.js'
 import BeatPlayer, { getTurnBeats } from './BeatPlayer.jsx'
 import ChoicePanel from './ChoicePanel.jsx'
 
+function turnCount(payload) {
+  return payload?.turns?.length || 0
+}
+
 export default function CurrentScene() {
   const worldId = useStore((s) => s.worldId)
   const enabled = useStore((s) => s.tab === 'current')
@@ -16,69 +20,106 @@ export default function CurrentScene() {
   const [history, setHistory] = useState(null)
   const [choiceVisible, setChoiceVisible] = useState(false)
   const [roundKey, setRoundKey] = useState(0)
-  const [initialLoading, setInitialLoading] = useState(false)
+  const [loadingDots, setLoadingDots] = useState(false)
+  const [resumeAtEnd, setResumeAtEnd] = useState(false)
+  const [recoveryRequest, setRecoveryRequest] = useState(null)
   const abortRef = useRef(null)
   const submittingRef = useRef(false)
+  const requestRef = useRef(null)
 
   const lastTurn = history?.turns?.[history.turns.length - 1]
   const time = lastTurn?.time_display || ''
   const place = pendingMeta?.place || lastTurn?.meta?.place || ''
 
-  const applyHistory = (payload) => {
+  const applyHistory = (payload, { readyForChoice = false } = {}) => {
     setHistory(payload)
     const last = payload?.turns?.[payload.turns.length - 1]
-    if (!last) return false
+    if (!last) {
+      setBeats([])
+      setPendingMeta(null)
+      setServerDone(false)
+      setChoiceVisible(false)
+      setResumeAtEnd(false)
+      return false
+    }
     setBeats(getTurnBeats(last))
     setPendingMeta(last.meta || null)
     setServerDone(true)
     setBusy(false)
+    setResumeAtEnd(true)
+    setChoiceVisible(readyForChoice)
+    setRecoveryRequest(null)
     setRoundKey((key) => key + 1)
     return true
   }
 
-  const runSSE = async (url, body) => {
+  const reconcileFailure = async (message, request) => {
+    try {
+      const latest = await fetchJson(`/api/game/${worldId}/history`)
+      if (requestRef.current !== request) return
+      if (turnCount(latest) > request.historyTurnCount) {
+        applyHistory(latest, { readyForChoice: true })
+        setError('')
+        bumpWorlds()
+        return
+      }
+    } catch {
+      // Keep the retry controls visible when the recovery request also fails.
+    }
+    if (requestRef.current !== request) return
+    setError(message)
+    setRecoveryRequest(request)
+  }
+
+  const runSSE = async (url, body, historyTurnCount = turnCount(history)) => {
     const controller = new AbortController()
+    const request = { url, body, historyTurnCount }
     abortRef.current = controller
+    requestRef.current = request
     setBusy(true)
-    setInitialLoading(true)
     setError('')
+    setRecoveryRequest(null)
     setChoiceVisible(false)
     setBeats([])
     setPendingMeta(null)
     setServerDone(false)
+    setResumeAtEnd(false)
     setRoundKey((key) => key + 1)
     try {
       await postSSE(url, body, {
         beat: (event) => {
           if (event.beat) setBeats((current) => [...current, event.beat])
-          setInitialLoading(false)
         },
-        meta: (event) => {
-          setPendingMeta(event.meta || null)
-          setInitialLoading(false)
-        },
+        meta: (event) => setPendingMeta(event.meta || null),
         done: (event) => {
           setServerDone(true)
           setBusy(false)
-          setInitialLoading(false)
+          setLoadingDots(false)
+          setRecoveryRequest(null)
+          requestRef.current = null
           if (event.history) {
             setHistory(event.history)
             const last = event.history.turns?.[event.history.turns.length - 1]
-            if (last) setPendingMeta((current) => current || last.meta || null)
+            if (last) {
+              setPendingMeta((current) => current || last.meta || null)
+              setBeats((current) => current.length ? current : getTurnBeats(last))
+            }
           }
           bumpWorlds()
         },
         error: (event) => {
-          setError(event.message || '生成失败')
           setBusy(false)
-          setInitialLoading(false)
+          setLoadingDots(false)
+          setRecoveryRequest(request)
+          void reconcileFailure(event.message || '生成失败', request)
         },
       }, controller.signal)
     } catch (event) {
       if (event.name !== 'AbortError') {
-        setError(event.message || '连接失败')
         setBusy(false)
-        setInitialLoading(false)
+        setLoadingDots(false)
+        setRecoveryRequest(request)
+        void reconcileFailure(event.message || '连接失败', request)
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null
@@ -87,22 +128,35 @@ export default function CurrentScene() {
   }
 
   useEffect(() => {
+    if (!busy || beats.length > 0) {
+      setLoadingDots(false)
+      return undefined
+    }
+    const timer = window.setTimeout(() => setLoadingDots(true), 900)
+    return () => window.clearTimeout(timer)
+  }, [busy, beats.length, roundKey])
+
+  useEffect(() => {
     let cancelled = false
     setHistory(null)
     setBeats([])
     setPendingMeta(null)
     setServerDone(false)
     setChoiceVisible(false)
+    setRecoveryRequest(null)
     setError('')
     ;(async () => {
       try {
         const payload = await fetchJson(`/api/game/${worldId}/history`)
         if (cancelled) return
-        if (!applyHistory(payload)) {
-          await runSSE(`/api/game/${worldId}/start`, {})
+        if (!applyHistory(payload, { readyForChoice: turnCount(payload) > 0 })) {
+          await runSSE(`/api/game/${worldId}/start`, {}, 0)
         }
       } catch (event) {
-        if (!cancelled) setError(event.message || '载入世界失败')
+        if (!cancelled) {
+          setError(event.message || '载入世界失败')
+          setRecoveryRequest(null)
+        }
       }
     })()
     return () => {
@@ -116,10 +170,26 @@ export default function CurrentScene() {
     const action = String(value || '').trim()
     if (!action || busy || submittingRef.current) return
     submittingRef.current = true
-    await runSSE(`/api/game/${worldId}/action`, { input: action })
+    await runSSE(`/api/game/${worldId}/action`, { input: action }, turnCount(history))
   }
 
-  const retry = () => runSSE(`/api/game/${worldId}/start`, {})
+  const retryRequest = () => {
+    const request = recoveryRequest || requestRef.current
+    if (request) runSSE(request.url, request.body, request.historyTurnCount)
+    else runSSE(`/api/game/${worldId}/start`, {}, turnCount(history))
+  }
+
+  const restorePrevious = async () => {
+    try {
+      const payload = await fetchJson(`/api/game/${worldId}/history`)
+      applyHistory(payload, { readyForChoice: turnCount(payload) > 0 })
+      setError('')
+    } catch (event) {
+      setError(event.message || '无法恢复上一回合')
+    }
+  }
+
+  const actionRecovery = recoveryRequest?.url.endsWith('/action')
 
   return (
     <div className="current-scene">
@@ -128,26 +198,27 @@ export default function CurrentScene() {
         {place && <span className="chip dim">{place}</span>}
       </div>
       <div className="current-scene-body">
-        {error && !beats.length ? (
-          <div className="scene-retry">
+        <BeatPlayer key={roundKey} beats={beats} serverDone={serverDone}
+          pendingMeta={pendingMeta} loadingDots={loadingDots} resumeAtEnd={resumeAtEnd}
+          enabled={enabled && !choiceVisible && !error}
+          onChoiceReady={() => setChoiceVisible(true)} />
+        {error && (
+          <div className="scene-recovery">
             <div className="error">{error}</div>
-            <button type="button" className="btn primary" onClick={retry}>重试开场</button>
+            <div className="scene-recovery-actions">
+              <button type="button" className="btn primary" onClick={retryRequest}>
+                {actionRecovery ? '重试本回合' : '重试开场'}
+              </button>
+              {actionRecovery && <button type="button" className="btn" onClick={restorePrevious}>返回上一选择</button>}
+            </div>
           </div>
-        ) : (
-          <>
-            <BeatPlayer key={roundKey} beats={beats} serverDone={serverDone}
-              pendingMeta={pendingMeta} busy={busy} initialLoading={initialLoading}
-              enabled={enabled && !choiceVisible}
-              onChoiceReady={() => setChoiceVisible(true)} />
-            {choiceVisible && pendingMeta && (
-              <div className="choice-layer">
-                <ChoicePanel choices={pendingMeta.choices || []} disabled={busy} onSubmit={submitAction} />
-              </div>
-            )}
-          </>
+        )}
+        {choiceVisible && pendingMeta && !error && (
+          <div className="choice-layer">
+            <ChoicePanel choices={pendingMeta.choices || []} disabled={busy} onSubmit={submitAction} />
+          </div>
         )}
       </div>
-      {error && beats.length > 0 && <div className="scene-inline-error error">{error}</div>}
     </div>
   )
 }

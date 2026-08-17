@@ -52,7 +52,9 @@ async def world_tick(llm, minutes, main_plot, state_summary, threads,
                  minutes, sev, state_summary, "\n".join(threads), main_plot,
                  "\n".join(npc_lines))}],
             aux=True, max_tokens=600)
-        obj = _loads(raw) or {}
+        obj = _loads(raw)
+        if not isinstance(obj, dict):
+            return {"ok": False, "developments": [], "plot_pressure": "", "npc_updates": {}}
     except Exception:
         logger.exception("World tick failed")
         return {"ok": False, "developments": [], "plot_pressure": "", "npc_updates": {}}

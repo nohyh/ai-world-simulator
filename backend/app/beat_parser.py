@@ -4,36 +4,52 @@ from __future__ import annotations
 
 import html
 import re
-import xml.etree.ElementTree as ET
 
 
 _FENCE_RE = re.compile(r"^\s*```(?:xml|html)?\s*$", re.IGNORECASE)
+_BEAT_RE = re.compile(
+    r"<beat\b(?P<attrs>[^>]*)>(?P<text>.*?)</beat\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_ATTR_RE = re.compile(
+    r"(?P<key>[\w:-]+)\s*=\s*(?:\"(?P<double>[^\"]*)\"|"
+    r"'(?P<single>[^']*)'|(?P<bare>[^\s>]+))"
+)
+_BEAT_MARKUP_RE = re.compile(r"</?beat\b[^>]*>", re.IGNORECASE)
 
 
-def _narration(text: str) -> dict:
-    return {"type": "narration", "speaker": None, "text": text.strip()}
+def _narration(text: str, speaker: str | None = None) -> dict:
+    return {"type": "narration", "speaker": speaker or None, "text": text.strip()}
 
 
-def _parse_line(line: str) -> dict | None:
+def _attributes(raw: str) -> dict[str, str]:
+    attrs: dict[str, str] = {}
+    for match in _ATTR_RE.finditer(raw):
+        value = match.group("double")
+        if value is None:
+            value = match.group("single")
+        if value is None:
+            value = match.group("bare")
+        attrs[match.group("key").lower()] = html.unescape(value or "")
+    return attrs
+
+
+def _parse_line(line: str) -> list[dict]:
     candidate = line.strip()
     if not candidate or _FENCE_RE.match(candidate):
-        return None
-    try:
-        element = ET.fromstring(candidate)
-    except ET.ParseError:
-        return None
-    if element.tag != "beat":
-        return None
-    beat_type = (element.attrib.get("type") or "").strip().lower()
-    text = html.unescape("".join(element.itertext())).strip()
-    if beat_type not in {"narration", "dialogue"} or not text:
-        return None
-    speaker = (element.attrib.get("speaker") or "").strip() or None
-    if beat_type == "dialogue" and not speaker:
-        return None
-    if beat_type == "narration":
-        speaker = None
-    return {"type": beat_type, "speaker": speaker, "text": text}
+        return []
+    beats = []
+    for match in _BEAT_RE.finditer(candidate):
+        attrs = _attributes(match.group("attrs"))
+        beat_type = attrs.get("type", "").strip().lower()
+        text = html.unescape(match.group("text")).strip()
+        if beat_type not in {"narration", "dialogue"} or not text:
+            continue
+        speaker = attrs.get("speaker", "").strip() or None
+        if beat_type == "dialogue" and not speaker:
+            continue
+        beats.append({"type": beat_type, "speaker": speaker, "text": text})
+    return beats
 
 
 class BeatStreamParser:
@@ -68,25 +84,40 @@ class BeatStreamParser:
 
     def _consume_line(self, raw_line: str) -> list[dict]:
         parsed = _parse_line(raw_line)
-        if parsed is not None:
+        if parsed:
             out: list[dict] = []
             if self._pending_raw.strip():
                 out.append(_narration(self._pending_raw))
                 self._pending_raw = ""
-            out.append(parsed)
+            out.extend(parsed)
             self._seen_valid_beat = True
             return out
-        if raw_line.strip() and not _FENCE_RE.match(raw_line.strip()):
+
+        candidate = raw_line.strip()
+        if not candidate or _FENCE_RE.match(candidate):
+            return []
+
+        # A malformed beat after a valid one is provider noise, not story text.
+        # Before the first valid beat, strip the markup so the plain fallback is
+        # still useful when a model emits a nearly-correct tag.
+        if _BEAT_MARKUP_RE.search(candidate) or re.search(r"<\s*/?beat\b", candidate, re.IGNORECASE):
             if self._seen_valid_beat:
-                return [_narration(raw_line)]
-            self._pending_raw += raw_line
+                return []
+            cleaned = _BEAT_MARKUP_RE.sub(" ", raw_line).strip()
+            if cleaned:
+                self._pending_raw += cleaned + "\n"
+            return []
+
+        if self._seen_valid_beat:
+            return [_narration(raw_line)]
+        self._pending_raw += raw_line
         return []
 
 
 def beat_to_prose(beat: dict) -> str:
     """Render a beat back into the plain narrative consumed by simulation."""
     text = (beat.get("text") or "").strip()
-    if beat.get("type") == "dialogue" and beat.get("speaker"):
+    if beat.get("speaker"):
         return f"{beat['speaker']}：{text}"
     return text
 
