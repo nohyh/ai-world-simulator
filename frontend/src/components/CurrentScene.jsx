@@ -226,33 +226,32 @@ export default function CurrentScene() {
   const actionRecovery = recoveryRequest?.url.endsWith('/action')
 
   return (
-    <div className="current-scene">
-      <div className="current-scene-head">
-        <div className="scene-location" aria-label="当前场景">
-          {time && <span>{time}</span>}
-          {time && place && <span className="scene-location-separator">·</span>}
-          {place && <span>{place}</span>}
+    <div className="current-view">
+      <div className="current-stage">
+        <div className="stage-grain" aria-hidden="true" />
+        <div className="scene-context" aria-label="当前场景">
+          <strong>{time || '故事开始'}</strong>
+          <span>{place || '未知地点'}</span>
         </div>
-      </div>
-      <div className="current-scene-body">
-        <BeatPlayer key={roundKey} beats={beats} serverDone={serverDone}
-          pendingMeta={pendingMeta} loadingDots={loadingDots} resumeAtEnd={resumeAtEnd}
-          enabled={enabled && !choiceVisible && !error}
-          onChoiceReady={() => setChoiceVisible(true)} />
+        <div className="scene-void" aria-hidden="true" />
+        <div className="current-content">
+          <BeatPlayer key={roundKey} beats={beats} serverDone={serverDone}
+            pendingMeta={pendingMeta} loadingDots={loadingDots} resumeAtEnd={resumeAtEnd}
+            enabled={enabled && !choiceVisible && !error}
+            onChoiceReady={() => setChoiceVisible(true)} />
+          {choiceVisible && pendingMeta && !error && (
+            <ChoicePanel choices={pendingMeta.choices || []} disabled={busy} onSubmit={submitAction} />
+          )}
+        </div>
         {error && (
           <div className="scene-recovery">
             <div className="error">{error}</div>
             <div className="scene-recovery-actions">
-              <button type="button" className="btn primary" onClick={retryRequest}>
+              <button type="button" className="btn btn-primary" onClick={retryRequest}>
                 {actionRecovery ? '重试本回合' : '重试开场'}
               </button>
-              {actionRecovery && <button type="button" className="btn" onClick={restorePrevious}>返回上一选择</button>}
+              {actionRecovery && <button type="button" className="btn btn-secondary" onClick={restorePrevious}>返回上一选择</button>}
             </div>
-          </div>
-        )}
-        {choiceVisible && pendingMeta && !error && (
-          <div className="choice-layer">
-            <ChoicePanel choices={pendingMeta.choices || []} disabled={busy} onSubmit={submitAction} />
           </div>
         )}
       </div>

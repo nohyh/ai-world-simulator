@@ -13,6 +13,13 @@ function normalizeBeat(beat) {
   }
 }
 
+function beatLabel(beat) {
+  if (!beat) return '读取中'
+  if (beat.type === 'dialogue') return '对白'
+  if (beat.speaker === '你') return '行动'
+  return '叙事'
+}
+
 export default function BeatPlayer({
   beats,
   serverDone,
@@ -64,9 +71,7 @@ export default function BeatPlayer({
 
   useEffect(() => {
     if (!activeBeat || visibleCount >= characters.length) return undefined
-    const timer = window.setInterval(() => {
-      setVisibleCount((count) => Math.min(count + 1, characters.length))
-    }, 24)
+    const timer = window.setInterval(() => setVisibleCount((count) => Math.min(count + 1, characters.length)), 24)
     return () => window.clearInterval(timer)
   }, [activeBeat, characters.length, visibleCount])
 
@@ -102,25 +107,24 @@ export default function BeatPlayer({
     return () => document.removeEventListener('keydown', handleKeyDown)
   })
 
-  const handleStageClick = (event) => {
-    if (event.target.closest('button, textarea, input, select, a, [data-stop-advance]')) return
-    requestAdvance()
+  if (!activeBeat) {
+    return <div className="reading-stack reading-stack-empty">{loadingDots && <div className="vn-loading-dots">· · ·</div>}</div>
   }
 
   return (
-    <div className="vn-stage" onClick={handleStageClick} role="button" tabIndex={0}>
-      <div className="vn-stage-spacer" />
-      <div className={`vn-beat-frame ${activeBeat?.type === 'dialogue' ? 'dialogue' : 'narration'}`}>
-        <div key={activeIndex} className="vn-beat-content">
-          {activeBeat?.speaker && <div className="vn-speaker">{activeBeat.speaker}</div>}
-          {activeBeat && (
-            <div className="vn-text">
-              {characters.slice(0, visibleCount).join('')}
-              {!revealed && <span className="vn-caret">▍</span>}
-            </div>
-          )}
-        </div>
-        {revealed && activeBeat && <div className="vn-advance-mark">⌄</div>}
+    <div className="reading-stack">
+      <p className="beat-kicker">{beatLabel(activeBeat)}</p>
+      <p className="beat-speaker" hidden={!activeBeat.speaker}>{activeBeat.speaker}</p>
+      <button className="dialogue-surface" type="button" onClick={requestAdvance} aria-label="继续阅读">
+        <span className={`beat-text ${activeBeat.type === 'narration' ? 'is-narration' : ''} ${activeBeat.speaker === '你' ? 'is-player' : ''}`}>
+          {characters.slice(0, visibleCount).join('')}
+          {!revealed && <span className="vn-caret">▍</span>}
+        </span>
+        {revealed && <span className="beat-mark" aria-hidden="true" />}
+      </button>
+      <div className="reading-footer">
+        <span className="num">{String(Math.max(activeIndex + 1, 1)).padStart(2, '0')} / {String(beats.length).padStart(2, '0')}</span>
+        <span className="reading-hint">{activeIndex === beats.length - 1 ? (serverDone && pendingMeta ? '进入选择' : '等待后续') : '继续阅读'}</span>
       </div>
       {loadingDots && <div className="vn-loading-dots">· · ·</div>}
       {waitingForNext && <div className="vn-loading-dots vn-loading-dots-waiting">· · ·</div>}

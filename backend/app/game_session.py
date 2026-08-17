@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 _sessions: dict = {}
 
-_MODEL_KEYS = ("provider", "base_url", "api_key", "model", "aux_model", "temperature")
+_MODEL_KEYS = ("provider", "base_url", "api_key", "model", "aux_model", "temperature", "api_mode")
 
 
 def resolve_llm_config(db, world_cfg):

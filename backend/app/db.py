@@ -117,7 +117,7 @@ class Database:
             return None
         cfg = json.loads(r["config"])
         return {k: cfg.get(k) for k in
-                ("provider", "base_url", "api_key", "model", "aux_model")}
+                ("provider", "base_url", "api_key", "model", "aux_model", "api_mode")}
 
     # ---- 全局设置（模型配置）----
     def get_settings(self):

@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import Icon from './Icon.jsx'
 
-const CIRCLED = ['①', '②', '③', '④']
-
 export default function ChoicePanel({ choices = [], onSubmit, disabled = false }) {
   const [input, setInput] = useState('')
 
@@ -15,31 +13,21 @@ export default function ChoicePanel({ choices = [], onSubmit, disabled = false }
 
   return (
     <section className="choice-panel" data-stop-advance onClick={(event) => event.stopPropagation()}>
-      <div className="choice-panel-title">你准备怎么做？</div>
-      <div className="choice-panel-options">
+      <h2 className="choice-title">你准备怎么做？</h2>
+      <div className="choice-list">
         {choices.map((choice, index) => (
-          <button type="button" className="vn-choice" key={`${choice}-${index}`}
-            disabled={disabled} onClick={() => submit(choice)}>
-            <span className="vn-choice-index">{CIRCLED[index] || `${index + 1}.`}</span>
-            <span>{choice}</span>
+          <button className="choice-option" type="button" key={`${choice}-${index}`} disabled={disabled} onClick={() => submit(choice)}>
+            <span className="choice-number">{String(index + 1).padStart(2, '0')}</span>
+            <span className="choice-copy">{choice}</span>
+            <span className="choice-arrow">↗</span>
           </button>
         ))}
       </div>
-      <div className="choice-free-input">
-        <textarea rows={2} value={input} disabled={disabled}
-          placeholder="或输入自己的行动……"
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              submit(input)
-            }
-          }} />
-        <button type="button" className="choice-send" aria-label="发送" disabled={disabled || !input.trim()}
-          onClick={() => submit(input)}>
-          <Icon name="arrow" size={16} />
-        </button>
-      </div>
+      <form className="free-action" onSubmit={(event) => { event.preventDefault(); submit(input) }}>
+        <input className="input" value={input} disabled={disabled} placeholder="或者，写下你自己的行动……" onChange={(event) => setInput(event.target.value)} />
+        <button className="free-submit" type="submit" aria-label="发送行动" disabled={disabled || !input.trim()}><Icon name="arrow" size={17} /></button>
+      </form>
+      <p className="choice-foot">推荐行动与自由行动处于同一层级</p>
     </section>
   )
 }

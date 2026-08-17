@@ -1,44 +1,21 @@
 import { useEffect } from 'react'
 import { useStore } from './store.js'
 import { fetchJson } from './api.js'
-import Icon from './components/Icon.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import TopBar from './components/TopBar.jsx'
 import CurrentScene from './components/CurrentScene.jsx'
 import HistoryTab from './components/HistoryTab.jsx'
 import EventTreeTab from './components/EventTreeTab.jsx'
 import CharactersTab from './components/CharactersTab.jsx'
-import NewWorldModal from './components/NewWorldModal.jsx'
 import SettingsModal from './components/SettingsModal.jsx'
-import AmbientBackdrop from './components/AmbientBackdrop.jsx'
-
-function EmptyMain() {
-  const openModal = useStore((s) => s.openModal)
-  return (
-    <div className="empty-main">
-      <div className="hero-stack">
-        <div className="hero-title">
-          <span>探索未至之境</span>
-        </div>
-        <button className="hero-workspace" onClick={() => openModal('create')}>
-          <span className="folder-icon"><Icon name="folder" size={16} /></span> 新建一个世界 <span className="chevron"><Icon name="chevronDown" size={13} /></span>
-        </button>
-        <button className="hero-composer" onClick={() => openModal('create')}>
-          <span className="hero-placeholder">描述一个你想进入的世界</span>
-          <span className="hero-composer-row">
-            <span className="composer-plus"><Icon name="plus" size={16} />
-            </span>
-            <span>世界设定</span>
-            <span className="hero-send"><Icon name="arrow" size={16} /></span>
-          </span>
-        </button>
-      </div>
-    </div>
-  )
-}
+import LauncherView from './components/LauncherView.jsx'
 
 export default function App() {
-  const { worldId, tab, modal } = useStore()
+  const { worldId, tab, modal, viewStyle } = useStore()
+
+  useEffect(() => {
+    document.body.dataset.viewStyle = viewStyle
+  }, [viewStyle])
 
   // 拉一次设置，未配置 Key 时提醒（mock 演示模式不打扰）
   useEffect(() => {
@@ -50,10 +27,9 @@ export default function App() {
   }, [])
 
   return (
-    <div className="shell">
-      <AmbientBackdrop />
+    <div className="app-shell">
       <Sidebar />
-      <main className="main">
+      <main className="app-main">
         <TopBar />
         {worldId ? (
           <div className="tab-body">
@@ -62,9 +38,8 @@ export default function App() {
             <div className="tab-panel" hidden={tab !== 'tree'}><EventTreeTab key={worldId} /></div>
             <div className="tab-panel" hidden={tab !== 'chars'}><CharactersTab key={worldId} /></div>
           </div>
-        ) : <div className="tab-body"><EmptyMain /></div>}
+        ) : <LauncherView />}
       </main>
-      {modal === 'create' && <NewWorldModal />}
       {modal === 'settings' && <SettingsModal />}
     </div>
   )
