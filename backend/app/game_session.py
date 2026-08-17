@@ -128,7 +128,8 @@ class GameSession:
         async for ev in self._run_narrator(msgs):
             yield ev
         meta = self._last_meta
-        turn = {"player_action": None, "narrative": self._last_prose, "meta": meta}
+        turn = {"player_action": None, "narrative": self._last_prose,
+                "beats": list(self._last_beats), "meta": meta}
         self._commit_turn(turn)
         self.config["_has_opening"] = True
         self.db.save_world_config(self.world_id, self.config)
@@ -160,7 +161,8 @@ class GameSession:
         async for ev in self._run_narrator(msgs):
             yield ev
         meta = self._last_meta
-        turn = {"player_action": action, "narrative": self._last_prose, "meta": meta}
+        turn = {"player_action": action, "narrative": self._last_prose,
+                "beats": list(self._last_beats), "meta": meta}
         self._commit_turn(turn)
         self.db.touch_world(self.world_id)
         self._schedule_side_effects(turn)
@@ -472,6 +474,7 @@ class GameSession:
         turns = [{
             "player_action": t["player_action"],
             "narrative": t["narrative"],
+            "beats": list(t.get("beats") or []),
             "meta": t["meta"],
             "time_display": t["time_display"],
             "attr_changes": dict(t.get("attr_changes") or {}),

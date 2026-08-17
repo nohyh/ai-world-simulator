@@ -1,7 +1,7 @@
 """SQLite 存储：世界配置表 + 事件溯源表。
 
 事件类型（type 字段）：
-  TURN         一回合完整记录 {player_action, narrative, choices, minutes, place, present, witnessed_by}
+  TURN         一回合完整记录 {player_action, narrative, beats, choices, minutes, place, present, witnessed_by}
   NPC_ADD      新 NPC 持久化 {npcs: {name: card}}
   NPC_STATE    NPC 私有状态更新 {npcs: {name: {...}}}
   ATTR_CHANGE  玩家属性变化 {changes: {attr: delta}}

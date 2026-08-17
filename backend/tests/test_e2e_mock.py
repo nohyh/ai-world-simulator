@@ -63,9 +63,11 @@ async def test_full_game_flow(tmp_path, monkeypatch):
         st = s.state
         assert st.turn_count == 3
         assert all("[[META]]" not in t["narrative"] for t in st.turns)
+        assert all(t["beats"] for t in st.turns)
         # 事件树数据：每回合带属性/物品变化槽位 + 初始属性快照
         assert all("attr_changes" in t and "item_changes" in t for t in st.turns)
         payload = s._history_payload()
+        assert all(t["beats"] for t in payload["turns"])
         assert payload["initial_attrs"] == {"力量": 50}
 
         # 4) 玩家视角抽屉

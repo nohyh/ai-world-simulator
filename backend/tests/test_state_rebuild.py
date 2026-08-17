@@ -36,6 +36,16 @@ def test_rebuild_turn_updates_clock_and_place():
     assert st.present == ["老周"]
     assert st.turn_count == 2
     assert st.display_time() == "2041年7月16日 10:25"
+    assert st.turns[0]["beats"] == []
+
+
+def test_rebuild_preserves_narrative_beats_when_present():
+    beats = [{"type": "dialogue", "speaker": "陈医生", "text": "不要开灯。"}]
+    st = WorldState.rebuild([
+        ("TURN", {"narrative": "陈医生：不要开灯。", "beats": beats,
+                  "meta": {"minutes": 1, "present": ["陈医生"]}}),
+    ], CONFIG)
+    assert st.turns[0]["beats"] == beats
 
 
 def test_rebuild_side_effect_events():
