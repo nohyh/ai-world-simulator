@@ -5,6 +5,7 @@ import Icon from './components/Icon.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import TopBar from './components/TopBar.jsx'
 import CurrentScene from './components/CurrentScene.jsx'
+import HistoryTab from './components/HistoryTab.jsx'
 import EventTreeTab from './components/EventTreeTab.jsx'
 import CharactersTab from './components/CharactersTab.jsx'
 import NewWorldModal from './components/NewWorldModal.jsx'
@@ -54,7 +55,8 @@ export default function App() {
         <TopBar />
         {worldId ? (
           <div className="tab-body">
-            <div className="tab-panel" hidden={tab !== 'story'}><CurrentScene key={worldId} /></div>
+            <div className="tab-panel" hidden={tab !== 'current'}><CurrentScene key={worldId} /></div>
+            <div className="tab-panel" hidden={tab !== 'story'}><HistoryTab key={worldId} /></div>
             <div className="tab-panel" hidden={tab !== 'tree'}><EventTreeTab key={worldId} /></div>
             <div className="tab-panel" hidden={tab !== 'chars'}><CharactersTab key={worldId} /></div>
           </div>

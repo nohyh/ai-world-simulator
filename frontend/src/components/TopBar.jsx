@@ -3,6 +3,7 @@ import { fetchJson } from '../api.js'
 import { useStore } from '../store.js'
 
 const TABS = [
+  { key: 'current', label: '当前' },
   { key: 'story', label: '剧情' },
   { key: 'chars', label: '人物' },
   { key: 'tree', label: '剧情树' },
