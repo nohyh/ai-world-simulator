@@ -1,11 +1,12 @@
 """SQLite 存储：世界配置表 + 事件溯源表。
 
 事件类型（type 字段）：
-  TURN         一回合完整记录 {player_action, narrative, choices, minutes, place, present}
+  TURN         一回合完整记录 {player_action, narrative, choices, minutes, place, present, witnessed_by}
   NPC_STATE    NPC 私有状态更新 {npcs: {name: {...}}}
   ATTR_CHANGE  玩家属性变化 {changes: {attr: delta}}
   ITEM_CHANGE  关键物品变化 {add: [], remove: []}
-  WORLD_TICK   离屏世界推进 {developments: [], plot_pressure: str}
+  WORLD_TICK   离屏世界推进 {minutes, developments: [], plot_pressure: str, npc_updates: {}}
+  MAIN_PLOT_UPDATE 主线版本更新 {main_plot: str}
   CRYSTAL      记忆结晶 {layer, crystal}
 """
 import json

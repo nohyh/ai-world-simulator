@@ -3,10 +3,13 @@
 借鉴 Project Lunar 的分层结晶与 AI Town 的重排思想，检索用中文 bigram 重合度
 （无需分词依赖），permanent 层全量注入，其余层按相关度取 top-k。
 """
+import logging
 import re
 
 from . import config as C
 from . import prompts
+
+logger = logging.getLogger(__name__)
 
 
 def _tokens(text):
@@ -62,10 +65,21 @@ class MemoryEngine:
     def build_context(self, query, present_npcs, budget=C.MEMORY_BUDGET_CHARS):
         segments = []
         used = 0
+
+        def append_segment(seg):
+            nonlocal used
+            if used >= budget:
+                return False
+            remaining = budget - used
+            clipped = seg[:remaining]
+            segments.append(clipped)
+            used += len(clipped)
+            return len(clipped) == len(seg)
+
         for c in self.crystals.get("permanent", []):
             seg = "◆ 既成事实：" + c.get("summary", "")
-            segments.append(seg)
-            used += len(seg)
+            if not append_segment(seg):
+                break
         query_toks = _tokens(query)
         for layer in ("long", "medium", "short"):
             layer_crystals = self.crystals.get(layer, [])
@@ -77,12 +91,12 @@ class MemoryEngine:
             label = {"long": "◇ 篇章记忆", "medium": "○ 阶段记忆", "short": "· 近段记忆"}[layer]
             taken = 0
             for s, i, c in scored:
-                if taken >= C.PER_LAYER_TOP_K or used > budget:
+                if taken >= C.PER_LAYER_TOP_K or used >= budget:
                     break
                 facts = "；".join(c.get("world_facts") or [])
                 seg = f"{label}：{c.get('summary', '')}" + (f"（事实：{facts}）" if facts else "")
-                segments.append(seg)
-                used += len(seg)
+                if not append_segment(seg):
+                    break
                 taken += 1
         return segments
 
@@ -132,7 +146,7 @@ class MemoryEngine:
             if obj and isinstance(obj.get("summary"), str) and obj["summary"].strip():
                 return obj
         except Exception:
-            pass
+            logger.exception("Memory crystallization failed")
         return None
 
 

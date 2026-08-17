@@ -6,6 +6,7 @@
 同步路径只有 1 次 LLM 调用（决策 #3/#5）；副作用全部走辅助便宜模型。
 """
 import asyncio
+import logging
 
 from . import config as C
 from . import prompts
@@ -13,6 +14,8 @@ from .llm import LLMClient, LLMConfig
 from .memory_engine import MemoryEngine, _loads
 from . import npc_mind, world_reactor
 from .world_state import WorldState
+
+logger = logging.getLogger(__name__)
 
 _sessions: dict = {}
 
@@ -53,9 +56,16 @@ class GameSession:
         self.state = WorldState.rebuild(db.get_events(world_id), self.config)
         self.mem = MemoryEngine(self.state.crystals)
         self._side_tasks: list[asyncio.Task] = []
+        self._turn_lock = asyncio.Lock()
 
     # ================= 对外：开篇 =================
     async def ensure_opening(self):
+        """串行执行一个世界的开篇，避免重复创建 TURN。"""
+        async with self._turn_lock:
+            async for ev in self._ensure_opening_unlocked():
+                yield ev
+
+    async def _ensure_opening_unlocked(self):
         """SSE 生成器：若已有回合则直接结束，否则生成开篇。"""
         if self.state.turns:
             yield {"type": "done", "history": self._history_payload()}
@@ -88,6 +98,12 @@ class GameSession:
 
     # ================= 对外：玩家行动 =================
     async def process_action(self, action):
+        """串行执行一个世界的玩家行动，保证事件序列不会交叉。"""
+        async with self._turn_lock:
+            async for ev in self._process_action_unlocked(action):
+                yield ev
+
+    async def _process_action_unlocked(self, action):
         action = (action or "").strip()
         if not action:
             yield {"type": "error", "message": "行动不能为空"}
@@ -160,46 +176,79 @@ class GameSession:
         self._side_tasks.append(asyncio.create_task(self._side_effects(turn)))
 
     async def _drain_side_effects(self, timeout=90):
-        tasks = [t for t in self._side_tasks if not t.done()]
+        tasks = []
+        for task in self._side_tasks:
+            if task.done():
+                try:
+                    task.result()
+                except asyncio.CancelledError:
+                    logger.warning("Side-effect task was cancelled")
+                except Exception:
+                    logger.exception("Side-effect task failed")
+            else:
+                tasks.append(task)
         self._side_tasks = []
         if tasks:
             done, pending = await asyncio.wait(tasks, timeout=timeout)
+            for task in done:
+                try:
+                    task.result()
+                except asyncio.CancelledError:
+                    logger.warning("Side-effect task was cancelled")
+                except Exception:
+                    logger.exception("Side-effect task failed")
             self._side_tasks = list(pending)  # 未完成的下次继续等，不取消
+            if pending:
+                logger.warning("%d side-effect task(s) still pending after %ss", len(pending), timeout)
 
     async def _side_effects(self, turn):
-        try:
-            action = turn["player_action"] or "（冒险开始）"
-            narrative = turn["narrative"]
-            present = turn["meta"].get("present") or []
+        action = turn["player_action"] or "（冒险开始）"
+        narrative = turn["narrative"]
+        present = turn["meta"].get("present") or []
 
-            # 1) NPC 心智 + 属性/物品变化
-            updates, plot_advanced, attr_changes, item_changes = await npc_mind.update_minds(
-                self.llm, self.state.npcs, present, action, narrative,
-                self.state.player["attrs"])
+        # 1) NPC 心智 + 属性/物品变化。每个副作用独立失败，避免一个辅助
+        # 模型超时把世界时钟和记忆结晶一起吞掉。
+        try:
+            knowledge = {name: self.state.npc_knowledge_window(name)
+                         for name in present if name in self.state.npcs}
+            updates, plot_advanced, plot_update, attr_changes, item_changes = (
+                await npc_mind.update_minds(
+                    self.llm, self.state.npcs, present, action, narrative,
+                    self.state.player["attrs"], self.state.main_plot, knowledge))
             if updates:
                 self._append("NPC_STATE", {"npcs": updates})
             if attr_changes:
                 self._append("ATTR_CHANGE", {"changes": attr_changes})
             if item_changes.get("add") or item_changes.get("remove"):
                 self._append("ITEM_CHANGE", item_changes)
+            if plot_update:
+                self._append("MAIN_PLOT_UPDATE", {"main_plot": plot_update})
             if plot_advanced:
                 self._append("PLOT_PROGRESS", {})
+        except Exception:
+            logger.exception("NPC side effect failed")
 
-            # 2) 世界推进（时间跳跃）
-            minutes = int(turn["meta"].get("minutes") or 0)
-            if minutes >= C.WORLD_TICK_MIN_MINUTES:
+        # 2) 世界推进：使用累计的、尚未被 WORLD_TICK 消费的叙事分钟数。
+        try:
+            pending_minutes = self.state.world_tick_pending_minutes
+            if pending_minutes >= C.WORLD_TICK_MIN_MINUTES:
                 tick = await world_reactor.world_tick(
-                    self.llm, minutes, self.state.main_plot,
-                    self.state.tick_summary(), self.state.world_threads)
-                if tick.get("developments") or tick.get("plot_pressure"):
-                    self._append("WORLD_TICK", tick)
+                    self.llm, pending_minutes, self.state.main_plot,
+                    self.state.tick_summary(), self.state.world_threads, self.state.npcs)
+                # 即使 LLM 没生成可见变化，也必须记录消费事件，否则同一
+                # 段时间会在下一回合被重复推进。
+                tick["minutes"] = pending_minutes
+                self._append("WORLD_TICK", tick)
+        except Exception:
+            logger.exception("World tick side effect failed")
 
-            # 3) 记忆结晶
+        # 3) 记忆结晶
+        try:
             events = await self.mem.crystallize(self.llm, self.state.pending_crystal_turns)
             for etype, data in events:
                 self._append(etype, data)
         except Exception:
-            pass  # 副作用失败不阻断游戏
+            logger.exception("Memory side effect failed")
 
     # ================= 上下文组装 =================
     def _narrator_system(self):
@@ -218,19 +267,26 @@ class GameSession:
         # 记忆检索：查询 = 玩家行动 + 最近两回合的叙事
         query = action + " " + " ".join(
             t["narrative"][:200] for t in st.recent_turns(2))
-        mem_segments = self.mem.build_context(query, st.present)
-        mem_block = prompts.memory_block(mem_segments)
-
         pressure = st.plot_pressure
         if st.turns_since_plot >= C.PLOT_PRESSURE_TURNS and st.main_plot:
             pressure = (pressure + " " if pressure else "") + \
                        f"主线已经 {st.turns_since_plot} 回合无实质推进，必须开始主动介入。"
 
+        state_text = prompts.state_block(
+            st.player, st.npcs, st.display_time(), st.place, st.present)
+        thread_text = prompts.thread_block(st.main_plot, pressure, st.world_threads)
+        fixed_chars = len(state_text) + len(thread_text) + len(action) + 180
+        available = max(0, C.CONTEXT_BUDGET_CHARS - fixed_chars)
+        memory_budget = min(C.MEMORY_BUDGET_CHARS, int(available * 0.4))
+        history_budget = max(0, available - memory_budget)
+        mem_segments = self.mem.build_context(query, st.present, budget=memory_budget)
+        mem_block = prompts.memory_block(mem_segments)
+
         return prompts.narrator_user_message(
-            prompts.state_block(st.player, st.npcs, st.display_time(), st.place, st.present),
+            state_text,
             mem_block,
-            prompts.thread_block(st.main_plot, pressure, st.world_threads),
-            prompts.history_block(st.recent_turns()),
+            thread_text,
+            prompts.history_block(st.recent_turns(), budget=history_budget),
             action,
         )
 
@@ -258,7 +314,7 @@ class GameSession:
             self.state = WorldState.rebuild(self.db.get_events(self.world_id), self.config)
             self.mem = MemoryEngine(self.state.crystals)
         except Exception:
-            pass
+            logger.exception("NPC card parsing failed")
 
     def _turn_state_snapshots(self):
         """Rebuild the public state at the end of each explored turn.
@@ -277,6 +333,8 @@ class GameSession:
         return snapshots
 
     def _commit_turn(self, turn):
+        meta = turn.get("meta") or {}
+        turn["witnessed_by"] = list(meta.get("present") or [])
         self._append("TURN", turn)
 
     def _append(self, etype, data):

@@ -41,3 +41,12 @@ async def test_pending_and_crystal_flow():
     # 4 条正好一个 short batch，不触发级联
     assert ("CRYSTAL", {"layer": "short", "crystal": eng.crystals["short"][0]}) in events
     assert len(eng.crystals["short"]) == 1
+
+
+def test_memory_context_respects_character_budget():
+    eng = MemoryEngine({
+        "short": [], "medium": [], "long": [],
+        "permanent": [{"summary": "永久事实" * 500}],
+    })
+    segs = eng.build_context("事实", [], budget=40)
+    assert sum(len(s) for s in segs) <= 40

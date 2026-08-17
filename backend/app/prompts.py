@@ -90,15 +90,27 @@ def thread_block(main_plot, pressure, threads):
     return "\n".join(parts)
 
 
-def history_block(turns):
+def history_block(turns, budget=None):
     if not turns:
         return "【近期历史】\n（冒险刚刚开始）"
     lines = []
-    for t in turns:
+    used = 0
+    selected = []
+    # 从最新回合向前装箱，保证硬预算下近期事实优先。
+    for t in reversed(turns):
         act = f"玩家：{t['player_action']}" if t.get("player_action") else "（开局）"
-        lines.append(act)
-        lines.append(f"叙事：{t['narrative']}")
-    return "【近期历史】\n" + "\n".join(lines)
+        line = act + "\n" + f"叙事：{t['narrative']}"
+        if budget is not None and used >= max(0, budget):
+            break
+        if budget is not None and used + len(line) > max(0, budget):
+            remaining = max(0, budget - used)
+            if not selected and remaining:
+                selected.append(line[:remaining])
+            break
+        selected.append(line)
+        used += len(line)
+    lines = list(reversed(selected))
+    return "【近期历史】\n" + ("\n".join(lines) if lines else "（已按上下文预算裁剪）")
 
 
 def memory_block(segments):
@@ -145,7 +157,7 @@ NPC_CARDS_SYSTEM = """你是游戏世界构筑器。MOCK:npccards
  ],
  "main_plot": "一条 30~60 字的主线：世界正在发生什么、什么在逼近或崩塌"
 }
-要求：姓名使用原文专名；goal 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；secret_plan 尽量有（这是戏剧性的来源），但要贴合设定。"""
+要求：姓名使用原文专名；goal 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；secret_plan 只有在设定确实支持秘密或隐性计划时才填写，普通 NPC 可以留空，不要为了戏剧性硬造。"""
 
 
 def npc_cards_user_message(world_setting, important_people):
@@ -161,7 +173,7 @@ def npc_cards_user_message(world_setting, important_people):
 NPC_MIND_SYSTEM = """你是世界模拟器的后台状态更新器。MOCK:npcmind
 
 根据本回合剧情，更新在场 NPC 的私有心智，并判断玩家属性/物品是否发生值得记录的变化。
-每个 NPC 只能基于他自己可知晓的信息更新（他不在场的事他不知道）。
+每个 NPC 只能基于他自己可知晓的信息更新（他不在场的事他不知道）。【本回合剧情】和【他可知的信息】之外的内容一律不可当作记忆。
 
 严格输出 JSON（不要任何其他文字）：
 {
@@ -169,22 +181,26 @@ NPC_MIND_SYSTEM = """你是世界模拟器的后台状态更新器。MOCK:npcmin
    "NPC名": {"feeling": "此刻情绪（短语）", "goal": "当前目标（可保持原值）",
              "opinion_of_player": "对玩家的看法（短语）", "secret_plan": "秘密计划（可保持原值）"}
  },
+ "main_plot_update": "如主线发生了可确认的实质变化，给出更新后的主线；没有变化则留空字符串",
  "plot_advanced": true/false,
  "player_attr_changes": {"属性名": +1 或 -2},
  "key_item_changes": {"add": ["获得的关键物品"], "remove": ["失去的关键物品"]}
 }
-规则：plot_advanced 仅当本回合主线有实质推进（获得关键信息/化解威胁/关系质变）才为 true；
+规则：当前主线会在用户消息中明确给出。plot_advanced 仅当本回合主线有实质推进（获得关键信息/化解威胁/关系质变）才为 true；main_plot_update 只在主线表述需要更新时填写完整的新主线，否则留空；
 属性变化只在显著事件时给出（长期训练、重伤、领悟），每次至多 2 项、幅度 ≤3；
 key_item 只记录对剧情有意义的物品（关键道具、信物、武器），不要记普通消耗品；
 没有变化就输出空对象，不要硬凑。"""
 
 
-def npc_mind_user_message(action, narrative, npc_sections):
+def npc_mind_user_message(action, narrative, main_plot, npc_sections):
     return f"""【玩家行动】
 {action}
 
 【本回合剧情】
 {narrative}
+
+【当前主线】
+{main_plot or '（尚未形成）'}
 
 【待更新的 NPC 当前状态】
 {npc_sections}"""
@@ -225,13 +241,17 @@ TICK_SYSTEM = """你是世界模拟器的离屏推进器。MOCK:tick
 严格输出 JSON（不要任何其他文字）：
 {{
  "developments": ["离屏发生的变化，1~3 条，每条一句话"],
- "plot_pressure": "对主线压力的一句话描述（威胁更近了/暂时缓和/出现变数），没有则留空"
+ "plot_pressure": "对主线压力的一句话描述（威胁更近了/暂时缓和/出现变数），没有则留空",
+ "npc_updates": {{
+   "NPC名": {{"feeling": "新的情绪（没有变化则留空）", "goal": "新的目标（没有变化则留空）",
+               "opinion_of_player": "新的看法（没有变化则留空）", "secret_plan": "新的秘密计划（没有变化则留空）"}}
+ }}
 }}
-规则：保持克制，一次只推进一到两个主要发展；不开新谜团、不引入新命名角色（可以用群体指代）；
+规则：保持克制，一次只推进一到两个主要发展；不开新谜团、不引入新命名角色（可以用群体指代）；只更新确实在离屏时间内行动过的 NPC，普通 NPC 的字段可以全部留空；不要凭空给普通 NPC 添加秘密；
 变化要与现有暗流和主线因果连续；跳跃时间越长、等级越高，变化可以越大，但仍须合理。"""
 
 
-def tick_user_message(minutes, severity, state_summary, threads, main_plot):
+def tick_user_message(minutes, severity, state_summary, threads, main_plot, npc_context=""):
     sev = {"minor": "（轻微：日常运转层面的小变化）",
            "moderate": "（中等：足以改变局势的变化）",
            "major": "（重大：格局级的变化，但仍需因果合理）"}[severity]
@@ -245,6 +265,9 @@ def tick_user_message(minutes, severity, state_summary, threads, main_plot):
 
 【既有世界暗流】
 {threads or '（无）'}
+
+【NPC 离屏状态】
+{npc_context or '（无）'}
 
 请生成离屏世界变化。"""
 
@@ -315,10 +338,14 @@ def normalize_meta(meta, fallback_place, fallback_present):
     except (TypeError, ValueError):
         minutes = 5
     place = str(meta.get("place") or "").strip() or fallback_place
-    raw_present = meta.get("present")
-    if not isinstance(raw_present, list):
-        raw_present = []
-    present = [str(p).strip() for p in raw_present if str(p).strip()]
-    if not present:
-        present = fallback_present
+    # Missing `present` means the narrator omitted the field and may safely
+    # inherit the previous scene. An explicit [] means the protagonist is
+    # alone; never replace it with the previous NPC list.
+    if "present" in meta:
+        raw_present = meta.get("present")
+        if not isinstance(raw_present, list):
+            raw_present = []
+        present = [str(p).strip() for p in raw_present if str(p).strip()]
+    else:
+        present = list(fallback_present or [])
     return {"choices": choices, "minutes": minutes, "place": place, "present": present}

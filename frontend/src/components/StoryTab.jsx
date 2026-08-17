@@ -14,7 +14,7 @@ export default function StoryTab() {
   const [choices, setChoices] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [header, setHeader] = useState({ time: '', place: '', pressure: '' })
+  const [header, setHeader] = useState({ time: '', place: '' })
   const [input, setInput] = useState('')
   const logRef = useRef(null)
   const abortRef = useRef(null)
@@ -37,8 +37,6 @@ export default function StoryTab() {
       setHeader((h) => ({ ...h, time: last.time_display, place: last.meta?.place || h.place }))
       setChoices(last.meta?.choices || [])
     }
-    const pressure = history.state?.status?.plot_pressure
-    if (pressure !== undefined) setHeader((h) => ({ ...h, pressure }))
     setStreamAction(null)
     setStreamText('')
     setBusy(false)
@@ -80,13 +78,12 @@ export default function StoryTab() {
         const h = await fetchJson(`/api/game/${worldId}/history`)
         if (cancelled) return
         setTurns(h.turns)
-        const pressure = h.state?.status?.plot_pressure
         if (h.turns.length > 0) {
           const last = h.turns[h.turns.length - 1]
-          setHeader({ time: last.time_display, place: last.meta?.place || '', pressure: pressure || '' })
+          setHeader({ time: last.time_display, place: last.meta?.place || '' })
           setChoices(last.meta?.choices || [])
         } else {
-          setHeader({ time: '', place: '', pressure: pressure || '' })
+          setHeader({ time: '', place: '' })
           setStreamText('')
           await runSSE(`/api/game/${worldId}/start`, {})
         }
@@ -126,7 +123,6 @@ export default function StoryTab() {
       <div className="story-head">
         {header.time && <span className="mono chip">{header.time}</span>}
         {header.place && <span className="chip dim">{header.place}</span>}
-        {header.pressure && <span className="chip warn" title="主线压力">{header.pressure}</span>}
       </div>
 
       <div className="story-log" ref={logRef}>

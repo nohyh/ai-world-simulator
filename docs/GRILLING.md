@@ -47,19 +47,19 @@
 - 所有 system/user prompt 中文（`prompts.py`），UI 全中文，无混排残留。
 
 ### #7 纯回合制世界推进 —— ✅
-- 只在 `meta.minutes ≥ 60` 时触发离屏推进（`config.py:22`，`game_session.py:190`），无后台实时模拟、无离线推进。
-- 细节：`normalize_meta` 对 minutes 的兜底是 5 分钟——若模型连续漏输出 minutes，世界推进会静默失效（当前概率低，提示词已约束；记录在案）。
+- 叙事分钟在 `WorldState.world_tick_pending_minutes` 中跨回合累计，达到 60 分钟后由一个带 `minutes` 的 `WORLD_TICK` 事件消费；无后台实时模拟、无离线推进。
+- Tick 事件同时携带离屏 NPC 更新，重建时与世界变化一起恢复，避免副作用中断造成私有状态丢失。
 
 ### #8 NPC 秘密与玩家视角 —— ✅（UI 一处丢失）
 - `drawer_snapshot`（`world_state.py:154-185`）只暴露身份/关系/表面情绪；goal/secret_plan 不进 UI（e2e 测试断言 `secret_plan not in n`）✓。
-- 信息隔离实现是「在场过滤」的简化版：只有 `present` 里的 NPC 才更新心智，且叙事 prompt 给每个 NPC 标注【仅叙事者可知】由模型自律——比 Lunar 的 witnessed_by 盖章 + auditor 复核弱，但符合 V1「不做审计员」的锁定。
+- 信息隔离现在以 TURN 事件的 `witnessed_by` 为边界：NPC 心智读取自己的目击历史窗口；不在场 NPC 不会因玩家刚刚经历的场景获得记忆。仍不引入 Lunar 的 auditor，保持 V1 复杂度。
 - ⚠️ **丢失**：旧「世界」抽屉里的大事记（chronicle，记忆结晶的公开摘要列表）在新 UI 中**没有任何展示入口**（grep 全前端无 chronicle）。数据还在（`drawer_snapshot.world.chronicle`），只是 UI 没接。见第二轮。
 
 ### #9 模型与协议 —— ✅
 - 默认 DeepSeek `deepseek-chat`，OpenAI 兼容（`llm.py`），支持任意兼容端点；`aux_model` 独立配置（这一点比 Lunar 强——Lunar 的 aux 模型当前就是主模型，`main.py:80`）；mock 演示模式覆盖全流程（含 npc_cards/npcmind/crystal/tick 四类 mock 回复）。
 
-### #10 篇幅自适应 —— ⚠️ 只有 prompt 层面
-- 叙事守则第 5 条写了自适应规则，但**没有硬性预算**：最近 6 回合原文（`RECENT_RAW_TURNS=6`）不做 token 记账/截断，长叙事叠满 6 回合后 prompt 可能膨胀。SillyTavern 的核心教训是「逐段记账、从旧到新裁剪、近因永在」；Lunar 有 provider 缩放的预算算术（`narrator_engine.py:416-468`）。DeepSeek 128K 窗口下短期无碍，但这是**长战役的第一风险点**，建议低成本补一个字符级预算 + 从旧截断。
+### #10 篇幅自适应 —— ✅
+- 叙事 user context 现在有 `CONTEXT_BUDGET_CHARS` 硬字符预算：固定世界状态优先，记忆与历史分配剩余预算，历史从最新回合向前装箱。这个实现借鉴 SillyTavern 的逐段记账和 Lunar 的预算窗口，但不引入 token 依赖。
 
 ---
 
@@ -112,13 +112,13 @@
 
 | 问 | 现状 | 风险 | 建议 |
 |---|---|---|---|
-| 副作用异常 | `_side_effects` 整体 `except Exception: pass`（`game_session.py:201`） | 失败静默，NPC 心智/世界推进悄悄不工作，无日志无告警 | 至少 `logging.exception`；可选第 7 项 USAGE 遥测 |
+| 副作用异常 | 每个 NPC/World Tick/记忆副作用独立捕获 | 单个辅助模型失败不应阻断回合；任务仍可能超时 | `logger.exception` 记录并在下一回合继续 drain |
 | 会话/任务泄漏 | `drop_session` 不取消 `_side_tasks`；删除世界后后台任务继续烧 token | 浪费 + 数据库已删后任务仍 `_append`（写不进去但不报错） | `drop_session` 时 cancel 未完成任务 |
 | 历史无界 | `/history` 全量返回；EventTree 全量渲染 | 长战役 JSON 与 DOM 双膨胀 | 服务端截断/分页 + 前端懒加载（上表 #9） |
-| 在场名单 | `meta.present` 缺失时回退上一回合名单（`prompts.py:315-317`） | 已离开的 NPC 被误认为在场，心智更新张冠李戴 | 缺省置空而不是回退旧名单 |
-| 并发 | 无每世界锁 | 同世界双请求交错 | 低成本 `asyncio.Lock` 每 session 一把 |
+| 在场名单 | `present` 缺失才回退；显式 `[]` 表示独处 | 已离开的 NPC 被误认为在场，心智更新张冠李戴 | 已修复并加 meta 测试 |
+| 并发 | 每个 `GameSession` 有 `asyncio.Lock` | 同世界双请求交错 | 开篇与玩家行动统一串行 |
 | 会话内存 | `_sessions` 无上限无回收 | 多世界累积 | 空闲超时清理（低优先） |
-| 测试 | 19 个，覆盖 e2e/meta/记忆/重建/设置 | npc_mind、world_reactor、llm 重试、prompt 关键路径无单测（仅 e2e 间接） | Lunar 每 engine 都有测试；补 3-4 个单测 |
+| 测试 | 26 个，覆盖 e2e/meta/记忆/重建/设置/目击窗口/累计时钟 | 仍未覆盖真实 provider 网络重试 | 保持 mock 全流程，网络层另测 |
 | 开篇失败 | `_parse_npc_cards` 失败静默 → 无 NPC 开局；`_has_opening` 标记与 `state.turns` 双源 | 极端情况下玩家卡在「请先调用 start」 | 失败时给用户可见提示 |
 
 ---

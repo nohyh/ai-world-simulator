@@ -58,6 +58,12 @@ def test_normalize_meta_clamps():
     assert m["choices"][0] == "好"
     assert m["minutes"] == 60 * 24 * 30
     assert m["place"] == "旧地点"
+    assert m["present"] == []
+
+
+def test_normalize_meta_missing_present_inherits_previous_scene():
+    from app.prompts import normalize_meta
+    m = normalize_meta({"minutes": 5}, fallback_place="旧地点", fallback_present=["甲"])
     assert m["present"] == ["甲"]
 
 

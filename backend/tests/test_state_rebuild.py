@@ -70,3 +70,48 @@ def test_pending_crystal_turns_tracks_cursor():
     st = WorldState.rebuild(events, CONFIG)
     assert len(st.pending_crystal_turns) == 1
     assert st.pending_crystal_turns[0]["player_action"] == "a4"
+
+
+def test_world_tick_accumulates_and_consumes_narrative_minutes():
+    st = WorldState.rebuild([
+        ("TURN", {"narrative": "短暂交谈", "meta": {"minutes": 30, "present": []}}),
+        ("TURN", {"narrative": "继续赶路", "meta": {"minutes": 35, "present": []}}),
+    ], CONFIG)
+    assert st.time_minutes == 65
+    assert st.world_tick_pending_minutes == 65
+
+    st.apply("WORLD_TICK", {
+        "minutes": 65,
+        "developments": [],
+        "npc_updates": {"陈医生": {"goal": "赶往北岭", "feeling": "焦虑"}},
+    })
+    assert st.world_tick_pending_minutes == 0
+    assert st.npcs["陈医生"]["goal"] == "赶往北岭"
+
+
+def test_npc_knowledge_window_only_contains_witnessed_turns():
+    st = WorldState.rebuild([
+        ("TURN", {"narrative": "陈医生说了秘密", "witnessed_by": ["陈医生"],
+                   "meta": {"minutes": 5, "present": ["陈医生"]}}),
+        ("TURN", {"narrative": "玩家独自发现了线索", "witnessed_by": [],
+                   "meta": {"minutes": 5, "present": []}}),
+    ], CONFIG)
+    knowledge = st.npc_knowledge_window("陈医生")
+    assert "陈医生说了秘密" in knowledge
+    assert "独自发现了线索" not in knowledge
+
+
+def test_public_snapshot_hides_director_state():
+    st = WorldState.rebuild([
+        ("WORLD_TICK", {"developments": ["暗流"], "plot_pressure": "逼近"}),
+    ], CONFIG)
+    snapshot = st.drawer_snapshot()
+    assert "plot_pressure" not in snapshot["status"]
+    assert "threads" not in snapshot["world"]
+
+
+def test_main_plot_update_is_event_sourced():
+    st = WorldState.rebuild([
+        ("MAIN_PLOT_UPDATE", {"main_plot": "铁鸦集团已经封锁北岭"}),
+    ], CONFIG)
+    assert st.main_plot == "铁鸦集团已经封锁北岭"

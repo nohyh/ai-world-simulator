@@ -218,8 +218,7 @@ button { -webkit-tap-highlight-color: transparent; }
 /* Event tree */
 .tree, .chars { width: min(820px, 100%); margin: 0 auto; }
 .tree-overview { display: flex; gap: 24px; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-small); }
-.tree-plot, .tree-threads { flex: 1; min-width: 250px; color: var(--text); font-size: 13px; }
-.tree-threads { color: var(--text-secondary); }
+.tree-plot { flex: 1; min-width: 250px; color: var(--text); font-size: 13px; }
 .tree-sec { margin-bottom: 6px; color: var(--caption); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .sec-gap { margin: 26px 0 10px; }
 .timeline { position: relative; padding-left: 25px; }

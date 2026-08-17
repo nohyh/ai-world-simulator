@@ -61,6 +61,7 @@ class WorldState:
         self.world_threads = []
         self.turns = []           # {player_action, narrative, meta, time_display}
         self.time_minutes = 0
+        self.world_tick_pending_minutes = 0
         self.place = config.get("start_place") or "未知地点"
         self.present = []
         self.turn_count = 0
@@ -80,18 +81,24 @@ class WorldState:
     def apply(self, etype, data):
         if etype == "TURN":
             meta = data.get("meta") or {}
-            self.time_minutes += int(meta.get("minutes") or 0)
+            minutes = int(meta.get("minutes") or 0)
+            self.time_minutes += minutes
+            self.world_tick_pending_minutes += minutes
             if meta.get("place"):
                 self.place = meta["place"]
             self.present = list(meta.get("present") or [])
             self.seen_npcs.update(name for name in self.present if name in self.npcs)
             self.turn_count += 1
             self.turns_since_plot += 1
+            witnessed = data.get("witnessed_by")
+            if not isinstance(witnessed, list):
+                witnessed = meta.get("present") if isinstance(meta.get("present"), list) else []
             self.turns.append({
                 "player_action": data.get("player_action"),
                 "narrative": data.get("narrative") or "",
                 "meta": meta,
                 "time_display": self.display_time(),
+                "witnessed_by": list(witnessed),
                 "attr_changes": {},
                 "item_changes": {"add": [], "remove": []},
             })
@@ -124,9 +131,27 @@ class WorldState:
                     if self.turns:
                         self.turns[-1]["item_changes"]["remove"].append(it)
         elif etype == "WORLD_TICK":
+            consumed = max(0, int(data.get("minutes") or 0))
+            self.world_tick_pending_minutes = max(
+                0, self.world_tick_pending_minutes - consumed)
             self.world_threads = (self.world_threads + list(data.get("developments") or []))[-5:]
             if data.get("plot_pressure"):
                 self.plot_pressure = data["plot_pressure"]
+            # Keep off-screen NPC progression in the same event as the tick,
+            # so rebuilding after an interrupted side effect cannot lose it.
+            for name, fields in (data.get("npc_updates") or {}).items():
+                npc = self.npcs.get(name)
+                if not npc or not isinstance(fields, dict):
+                    continue
+                for key, value in fields.items():
+                    if key in npc:
+                        npc[key] = value
+                if "feeling" in fields:
+                    npc["feeling_turn"] = self.turn_count
+        elif etype == "MAIN_PLOT_UPDATE":
+            plot = str(data.get("main_plot") or "").strip()
+            if plot:
+                self.main_plot = plot[:240]
         elif etype == "CRYSTAL":
             layer = data.get("layer")
             if layer == "short":
@@ -155,6 +180,32 @@ class WorldState:
             if npc["feeling"] and self.turn_count - npc["feeling_turn"] > C.FEELING_DECAY_TURNS:
                 npc["feeling"] = ""
 
+    def npc_knowledge_window(self, name, budget=C.NPC_KNOWLEDGE_BUDGET_CHARS):
+        """Return only the recent turn history this NPC actually witnessed.
+
+        `witnessed_by` is persisted on TURN events, so this projection survives
+        a restart and cannot accidentally expose an off-screen scene to an NPC.
+        """
+        if not name:
+            return ""
+        lines = []
+        used = 0
+        for turn in reversed(self.turns):
+            witnesses = turn.get("witnessed_by") or turn.get("meta", {}).get("present") or []
+            if name not in witnesses:
+                continue
+            action = turn.get("player_action") or "（开局）"
+            line = f"玩家：{action}\n剧情：{turn.get('narrative') or ''}"
+            if used + len(line) > budget:
+                if not lines and budget > 0:
+                    lines.append(line[:budget])
+                break
+            lines.append(line)
+            used += len(line)
+        if not lines:
+            return "（没有目击到更早的相关事件）"
+        return "\n\n".join(reversed(lines))
+
     # ---------------- 抽屉（玩家视角） ----------------
     def drawer_snapshot(self):
         chronicle = []
@@ -179,11 +230,9 @@ class WorldState:
                 "place": self.place,
                 "attrs": dict(self.player["attrs"]),
                 "key_items": list(self.player["key_items"]),
-                "plot_pressure": self.plot_pressure,
             },
             "world": {
                 "main_plot": self.main_plot,
-                "threads": list(self.world_threads),
                 "chronicle": [c for c in chronicle if c],
             },
         }

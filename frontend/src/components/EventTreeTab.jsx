@@ -98,12 +98,6 @@ export default function EventTreeTab() {
           <div className="tree-sec mono">主线</div>
           <div>{state?.world?.main_plot || '（尚未成形）'}</div>
         </div>
-        {state?.world?.threads?.length > 0 && (
-          <div className="tree-threads">
-            <div className="tree-sec mono">世界暗流</div>
-            {state.world.threads.map((thread, i) => <div key={i}>· {thread}</div>)}
-          </div>
-        )}
       </div>
 
       {turns.length === 0 && <div className="sidebar-hint">还没有任何事件——先去剧情页开始冒险。</div>}
