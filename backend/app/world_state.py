@@ -159,8 +159,9 @@ class WorldState:
             self.world_tick_pending_minutes = max(
                 0, self.world_tick_pending_minutes - consumed)
             self.world_threads = (self.world_threads + list(data.get("developments") or []))[-5:]
-            if data.get("plot_pressure"):
-                self.plot_pressure = data["plot_pressure"]
+            # Every successful tick is the authoritative pressure snapshot;
+            # an empty value is meaningful and clears stale pressure.
+            self.plot_pressure = str(data.get("plot_pressure") or "")[:120]
             self.world_tick_count += 1
             self.world_tick_events.append({
                 "minutes": consumed,
@@ -258,14 +259,6 @@ class WorldState:
 
     # ---------------- 抽屉（玩家视角） ----------------
     def drawer_snapshot(self):
-        chronicle = []
-        for layer in ("short", "medium", "long"):
-            for c in reversed(self.crystals.get(layer, [])):
-                chronicle.append(c.get("summary") or "")
-                if len(chronicle) >= 8:
-                    break
-            if len(chronicle) >= 8:
-                break
         return {
             "character": {
                 "player": dict(self.player),
@@ -281,15 +274,17 @@ class WorldState:
                 "attrs": dict(self.player["attrs"]),
                 "key_items": list(self.player["key_items"]),
             },
-            "world": {
-                "main_plot": self.main_plot,
-                "chronicle": [c for c in chronicle if c],
-            },
+            # Director state and hidden world memory stay server-side. The
+            # public drawer only exposes player-facing character/status data.
+            "world": {},
         }
 
     def tick_summary(self):
         attrs = "，".join(f"{k}{v}" for k, v in self.player["attrs"].items())
-        return (f"玩家：{self.player['name']}（{self.player['identity']}，{attrs}）；"
+        return (f"世界设定：{self.config.get('world_setting') or '（无）'}；"
+                f"世界规则：{self.config.get('world_rules') or '（无特殊规则）'}；"
+                f"当前时间：{self.display_time()}；当前地点：{self.place}；"
+                f"玩家：{self.player['name']}（{self.player['identity']}，{attrs}）；"
                 f"关键人物：{'、'.join(self.npcs) or '无'}；"
                 f"主线：{self.main_plot}；当前压力：{self.plot_pressure or '无'}")
 

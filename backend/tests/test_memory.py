@@ -74,11 +74,30 @@ async def test_world_updates_can_crystallize_without_four_player_turns():
             return '{"summary":"王城已经沦陷","key_events":[],"characters":[],"world_facts":["王城沦陷"]}'
 
     events = await eng.crystallize(
-        FakeLLM(), [], [{"developments": ["王城已经沦陷"]}],
-        source_turn_count=2, source_world_tick_count=1)
+        FakeLLM(), [{"player_action": "等待", "narrative": "你等了一会儿。", "meta": {}}],
+        [{"developments": ["王城已经沦陷"]}],
+        source_turn_count=1, source_world_tick_count=1)
     assert events[0][0] == "CRYSTAL"
-    assert events[0][1]["source_turn_count"] == 2
+    assert events[0][1]["source_turn_count"] == 1
     assert events[0][1]["source_world_tick_count"] == 1
+
+
+def test_memory_context_includes_structured_fields():
+    eng = MemoryEngine({
+        "short": [], "medium": [], "long": [],
+        "permanent": [{
+            "summary": "旧城的门仍然关闭",
+            "key_events": ["守门人拒绝通行"],
+            "characters": [{"name": "守门人", "state": "警戒", "relationship": "陌生"}],
+            "world_facts": ["城门只在黎明开启"],
+            "open_threads": ["取得通行许可"],
+        }],
+    })
+    context = "\n".join(eng.build_context("守门人", []))
+    assert "守门人拒绝通行" in context
+    assert "人物状态" in context
+    assert "城门只在黎明开启" in context
+    assert "取得通行许可" in context
 
 
 def test_memory_context_respects_character_budget():

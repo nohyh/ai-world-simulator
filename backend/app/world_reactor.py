@@ -29,11 +29,17 @@ def severity_for(minutes):
     return "minor"
 
 
-async def world_tick(llm, minutes, main_plot, state_summary, threads, npcs=None):
+async def world_tick(llm, minutes, main_plot, state_summary, threads,
+                     npcs=None, present=None):
     """生成离屏变化，并返回可回放的 NPC 私有更新。"""
     sev = severity_for(minutes)
+    present = set(present or [])
+    offscreen_npcs = {
+        name: npc for name, npc in (npcs or {}).items()
+        if name not in present
+    }
     npc_lines = []
-    for name, npc in (npcs or {}).items():
+    for name, npc in offscreen_npcs.items():
         npc_lines.append(
             f"- {name}：身份 {npc.get('identity', '')}；关系 {npc.get('relationship', '')}；"
             f"目标 {npc.get('goal', '') or '未记录'}；秘密计划 {npc.get('secret_plan', '') or '无'}；"
@@ -53,7 +59,7 @@ async def world_tick(llm, minutes, main_plot, state_summary, threads, npcs=None)
     devs = [str(d).strip()[:120] for d in (obj.get("developments") or []) if str(d).strip()][:3]
     pressure = str(obj.get("plot_pressure") or "").strip()[:120]
     npc_updates = {}
-    allowed = set((npcs or {}).keys())
+    allowed = set(offscreen_npcs)
     for name, fields in (obj.get("npc_updates") or {}).items():
         if name not in allowed or not isinstance(fields, dict):
             continue

@@ -306,9 +306,14 @@ class GameSession:
         try:
             pending_minutes = self.state.world_tick_pending_minutes
             if pending_minutes >= C.WORLD_TICK_MIN_MINUTES:
+                offscreen_npcs = {
+                    name: npc for name, npc in self.state.npcs.items()
+                    if name not in self.state.present
+                }
                 tick = await world_reactor.world_tick(
                     self.llm, pending_minutes, self.state.main_plot,
-                    self.state.tick_summary(), self.state.world_threads, self.state.npcs)
+                    self.state.tick_summary(), self.state.world_threads,
+                    offscreen_npcs, self.state.present)
                 if not tick.get("ok", True):
                     logger.warning("World tick did not complete; retaining %s pending minutes",
                                    pending_minutes)
@@ -325,8 +330,10 @@ class GameSession:
             pending_turns = self.state.pending_crystal_turns
             pending_ticks = self.state.pending_crystal_world_ticks
             source_turn_count = self.state._turn_crystal_cursor
-            if len(pending_turns) >= C.CRYSTAL_INTERVAL:
-                source_turn_count += C.CRYSTAL_INTERVAL
+            # WORLD_TICK can trigger a crystal before four turns are ready.
+            # Advance by the number actually included in the batch so those
+            # turns are not summarized again on a later crystal.
+            source_turn_count += min(len(pending_turns), C.CRYSTAL_INTERVAL)
             events = await self.mem.crystallize(
                 self.llm,
                 pending_turns,
@@ -368,10 +375,12 @@ class GameSession:
         thread_text = prompts.thread_block(st.main_plot, pressure, st.world_threads)
         fixed_chars = len(state_text) + len(thread_text) + len(action) + 180
         available = max(0, C.CONTEXT_BUDGET_CHARS - fixed_chars)
-        memory_budget = min(C.MEMORY_BUDGET_CHARS, int(available * 0.4))
-        history_budget = max(0, available - memory_budget)
+        memory_budget = min(C.MEMORY_BUDGET_CHARS, available)
         mem_segments = self.mem.build_context(query, st.present, budget=memory_budget)
         mem_block = prompts.memory_block(mem_segments)
+        # Return unused memory capacity to recent history instead of reserving
+        # a fixed 40/60 split.
+        history_budget = max(0, available - len(mem_block))
 
         return prompts.narrator_user_message(
             state_text,

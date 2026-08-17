@@ -33,6 +33,26 @@ async def test_world_tick_failure_is_not_a_consumable_tick():
     assert result["ok"] is False
 
 
+async def test_world_tick_only_receives_offscreen_npcs():
+    class FakeLLM:
+        def __init__(self):
+            self.user = ""
+
+        async def chat(self, messages, **kwargs):
+            self.user = messages[-1]["content"]
+            return "{}"
+
+    llm = FakeLLM()
+    result = await world_reactor.world_tick(
+        llm, 180, "主线", "世界上下文", [], {
+            "陈医生": {"identity": "医生"},
+            "老周": {"identity": "猎人"},
+        }, ["陈医生"])
+    assert result["ok"] is True
+    assert "陈医生" not in llm.user
+    assert "老周" in llm.user
+
+
 async def test_narrator_without_meta_gets_safe_fallback():
     class ProseOnlyLLM:
         async def stream_chat(self, messages):

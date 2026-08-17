@@ -61,7 +61,8 @@ def test_rebuild_side_effect_events():
     snap = st.drawer_snapshot()
     npc = [n for n in snap["character"]["npcs"] if n["name"] == "陈医生"][0]
     assert "secret_plan" not in npc and "goal" not in npc
-    assert snap["world"]["chronicle"] == ["开篇与地图"]
+    assert snap["world"] == {}
+    assert "main_plot" not in snap["world"]
 
 
 def test_new_npc_event_persists_and_exposes_seen_character():
@@ -101,6 +102,9 @@ def test_world_tick_accumulates_and_consumes_narrative_minutes():
     assert st.world_tick_pending_minutes == 0
     assert st.npcs["陈医生"]["goal"] == "赶往北岭"
 
+    st.apply("WORLD_TICK", {"minutes": 0, "developments": [], "plot_pressure": ""})
+    assert st.plot_pressure == ""
+
 
 def test_world_tick_cursor_survives_memory_crystal():
     st = WorldState.rebuild([
@@ -133,6 +137,16 @@ def test_public_snapshot_hides_director_state():
     snapshot = st.drawer_snapshot()
     assert "plot_pressure" not in snapshot["status"]
     assert "threads" not in snapshot["world"]
+
+
+def test_tick_summary_contains_world_context():
+    config = {**CONFIG, "world_setting": "1453 年的城邦", "world_rules": "没有无线电"}
+    st = WorldState(config)
+    summary = st.tick_summary()
+    assert "1453 年的城邦" in summary
+    assert "没有无线电" in summary
+    assert "当前时间：2041年7月16日 08:00" in summary
+    assert "当前地点：未知地点" in summary
 
 
 def test_main_plot_update_is_event_sourced():

@@ -31,7 +31,32 @@ def _crystal_text(c):
     for ch in c.get("characters") or []:
         parts.append(f"{ch.get('name', '')}{ch.get('state', '')}{ch.get('relationship', '')}")
     parts.extend(c.get("world_facts") or [])
+    parts.extend(c.get("open_threads") or [])
     return " ".join(parts)
+
+
+def _crystal_context(c):
+    """Render all structured memory fields the compressor produced."""
+    parts = []
+    if c.get("summary"):
+        parts.append(c["summary"])
+    if c.get("key_events"):
+        parts.append("关键事件：" + "；".join(str(x) for x in c["key_events"]))
+    characters = []
+    for ch in c.get("characters") or []:
+        if not isinstance(ch, dict):
+            continue
+        name = ch.get("name") or "未知人物"
+        state = ch.get("state") or ""
+        relationship = ch.get("relationship") or ""
+        characters.append(f"{name}（{state}{'；关系：' + relationship if relationship else ''}）")
+    if characters:
+        parts.append("人物状态：" + "；".join(characters))
+    if c.get("world_facts"):
+        parts.append("世界事实：" + "；".join(str(x) for x in c["world_facts"]))
+    if c.get("open_threads"):
+        parts.append("未完事项：" + "；".join(str(x) for x in c["open_threads"]))
+    return "；".join(parts)
 
 
 def _layer_base(layer):
@@ -77,7 +102,7 @@ class MemoryEngine:
             return len(clipped) == len(seg)
 
         for c in self.crystals.get("permanent", []):
-            seg = "◆ 既成事实：" + c.get("summary", "")
+            seg = "◆ 既成事实：" + _crystal_context(c)
             if not append_segment(seg):
                 break
         query_toks = _tokens(query)
@@ -93,8 +118,7 @@ class MemoryEngine:
             for s, i, c in scored:
                 if taken >= C.PER_LAYER_TOP_K or used >= budget:
                     break
-                facts = "；".join(c.get("world_facts") or [])
-                seg = f"{label}：{c.get('summary', '')}" + (f"（事实：{facts}）" if facts else "")
+                seg = f"{label}：{_crystal_context(c)}"
                 if not append_segment(seg):
                     break
                 taken += 1

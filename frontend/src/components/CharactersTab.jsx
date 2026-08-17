@@ -5,12 +5,16 @@ import { useStore } from '../store.js'
 /** 人物页：玩家卡片 + NPC 卡片（玩家视角——看不到任何人的秘密）。 */
 export default function CharactersTab() {
   const worldId = useStore((s) => s.worldId)
+  const tab = useStore((s) => s.tab)
   const [state, setState] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (tab !== 'chars') return
+    setState(null)
+    setError('')
     fetchJson(`/api/game/${worldId}/state`).then(setState).catch((e) => setError(e.message))
-  }, [worldId])
+  }, [worldId, tab])
 
   if (error) return <div className="page-pad"><div className="error">{error}</div></div>
   if (!state) return <div className="page-pad sidebar-hint">载入人物……</div>

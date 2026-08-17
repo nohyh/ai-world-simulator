@@ -74,32 +74,27 @@ function NodeDetail({ turn, index, onClose }) {
 /** 剧情树：展示已探索回合，并把未选择的选项渲染为不可进入的迷雾节点。 */
 export default function EventTreeTab() {
   const worldId = useStore((s) => s.worldId)
+  const tab = useStore((s) => s.tab)
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(null)
 
   useEffect(() => {
+    if (tab !== 'tree') return
     setData(null)
     setError('')
     setSelectedIndex(null)
     fetchJson(`/api/game/${worldId}/history`).then(setData).catch((e) => setError(e.message))
-  }, [worldId])
+  }, [worldId, tab])
 
   if (error) return <div className="page-pad"><div className="error">{error}</div></div>
   if (!data) return <div className="page-pad sidebar-hint">载入剧情树……</div>
 
-  const { turns, state } = data
+  const { turns } = data
   const selected = selectedIndex === null ? null : turns[selectedIndex]
 
   return (
     <div className="page-pad tree">
-      <div className="tree-overview">
-        <div className="tree-plot">
-          <div className="tree-sec mono">主线</div>
-          <div>{state?.world?.main_plot || '（尚未成形）'}</div>
-        </div>
-      </div>
-
       {turns.length === 0 && <div className="sidebar-hint">还没有任何事件——先去剧情页开始冒险。</div>}
 
       {selected && (
