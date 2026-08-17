@@ -1,6 +1,8 @@
 """全部中文 prompt。系统的灵魂所在，改动需谨慎。
 
-叙事主调用的输出协议：正文先流式输出，然后另起一行输出结构化块：
+叙事主调用的输出协议：逐行输出语义 Beat，然后另起一行输出结构化块：
+<beat type="narration">……</beat>
+<beat type="dialogue" speaker="人物名">……</beat>
 [[META]]
 {"choices": [...], "minutes": N, "place": "...", "present": [...]}
 [[END]]
@@ -34,7 +36,12 @@ NARRATOR_SYSTEM = """你是一个沉浸式中文文字世界模拟引擎的叙�
 7. 世界有内在压力：若【主线压力】提示存在，务必让它以合理方式渗入剧情，但不必每回合都直白展现。
 
 【输出格式】（严格遵守）
-先直接输出剧情正文，不要任何前缀。正文结束后，另起一行输出：
+先逐行输出剧情 Beat，不要任何前缀。每个 beat 必须完整占一行，beat 内禁止换行；一个 beat 只表达一个自然叙事节拍，通常 20~80 个汉字，不要为了凑长度拆句，也不要输出过长段落。
+可用的 Beat 只有两种：
+<beat type="narration">旁白或行动</beat>
+<beat type="dialogue" speaker="人物标准名称">台词</beat>
+dialogue 必须填写 speaker，且必须使用【已知人物标准名称】中的原名；旁白不要填写 speaker。
+正文结束后，另起一行输出：
 [[META]]
 {{"choices": ["……", "……", "……"], "minutes": 30, "place": "当前地点", "present": ["在场NPC名"]}}
 [[END]]
@@ -145,7 +152,7 @@ def opening_user_message(world_setting, rules, tone, player, npcs_desc, start_ti
         parts.append(f"\n【用户补充设定（与世界规则同等效力）】\n{notes}")
     parts.append("\n请生成开篇：把玩家自然地放进这个世界的一个具体场景中（不要流水账介绍设定），"
                  "场景中至少有一名初始人物在场，结尾留下明确的戏剧张力。"
-                 "正文 300~500 字，然后按输出格式给出 [[META]] 块。")
+                 "正文 300~500 字，拆成多个语义 Beat，然后按输出格式给出 [[META]] 块。")
     return "\n".join(parts)
 
 

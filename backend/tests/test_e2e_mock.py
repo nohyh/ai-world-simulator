@@ -30,17 +30,21 @@ async def test_full_game_flow(tmp_path, monkeypatch):
     s = get_session(wid, row, db)
     try:
         # 2) 开篇（NPC 解析 + 主叙事，全是 mock）
-        deltas, metas, dones = [], [], []
+        beats, metas, dones = [], [], []
         async for ev in s.ensure_opening():
-            if ev["type"] == "delta":
-                deltas.append(ev["text"])
+            if ev["type"] == "beat":
+                beats.append(ev["beat"])
             elif ev["type"] == "meta":
                 metas.append(ev["meta"])
             elif ev["type"] == "done":
                 dones.append(ev)
-        prose = "".join(deltas)
+        prose = "\n\n".join(
+            f"{b['speaker']}：{b['text']}" if b["speaker"] else b["text"]
+            for b in beats
+        )
         assert "[[META]]" not in prose and "[[END]]" not in prose
         assert "雨水" in prose
+        assert beats and beats[1]["speaker"] == "陈医生"
         assert metas and len(metas[0]["choices"]) >= 2
         assert dones and len(dones[0]["history"]["turns"]) == 1
         # NPC 卡已由 aux 解析并持久化
@@ -53,7 +57,7 @@ async def test_full_game_flow(tmp_path, monkeypatch):
             async for ev in s.process_action(action):
                 seen.append(ev)
             assert seen[-1]["type"] == "done"
-            assert seen[0]["type"] == "delta"
+            assert seen[0]["type"] == "beat"
         await s._drain_side_effects(timeout=10)
 
         st = s.state

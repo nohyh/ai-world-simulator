@@ -125,10 +125,10 @@ class LLMClient:
 
 # ---------------- mock 演示模式（无 API Key 也能跑通全流程） ----------------
 
-_MOCK_TURN = """雨水敲打着铁皮屋顶，你{action_echo}之后，避难所里陷入短暂沉默。
-陈医生把那张染血的地图摊开在桌面上，指尖压住北方的一处标记："他们昨晚又往北移动了，至少二十人。"
-老周在角落里擦拭着猎枪，头也不抬："粮最多撑五天。"
-你注意到队长一直没说话，只是盯着地图边缘的一行小字。
+_MOCK_TURN = """<beat type="narration">雨水敲打着铁皮屋顶，你{action_echo}之后，避难所里陷入短暂沉默。</beat>
+<beat type="dialogue" speaker="陈医生">他们昨晚又往北移动了，至少二十人。</beat>
+<beat type="dialogue" speaker="老周">粮最多撑五天。</beat>
+<beat type="narration">你注意到队长一直没说话，只是盯着地图边缘的一行小字。</beat>
 [[META]]
 {"choices": ["追问地图边缘的小字", "质问队长为何沉默", "清点避难所的存粮", "提议连夜出发"], "minutes": 25, "place": "避难所·医务室", "present": ["陈医生", "老周", "队长"]}
 [[END]]"""
