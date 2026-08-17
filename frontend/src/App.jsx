@@ -29,7 +29,7 @@ function EmptyMain() {
             <span className="composer-plus"><Icon name="plus" size={16} />
             </span>
             <span>世界设定</span>
-            <span className="hero-send"><Icon name="send" size={16} /></span>
+            <span className="hero-send"><Icon name="arrow" size={16} /></span>
           </span>
         </button>
       </div>

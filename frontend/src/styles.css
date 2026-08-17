@@ -278,18 +278,18 @@ button { -webkit-tap-highlight-color: transparent; }
 .scene-recovery { position: absolute; z-index: 7; top: 50%; left: 50%; width: min(500px, calc(100% - 40px)); display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px 24px; border: 1px solid var(--line); border-radius: 18px; background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: 0 18px 50px rgba(26, 32, 42, .14); text-align: center; transform: translate(-50%, -50%); }
 .scene-recovery-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .scene-inline-error { position: absolute; z-index: 5; right: 22px; bottom: 20px; margin: 0; }
-.choice-layer { position: absolute; z-index: 4; inset: 0; display: flex; align-items: center; justify-content: center; padding: 30px; background: rgba(25, 29, 35, .16); backdrop-filter: blur(3px); }
-.choice-panel { width: min(620px, 100%); padding: 25px 28px 22px; border: 1px solid rgba(255,255,255,.7); border-radius: 22px; background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: 0 24px 70px rgba(20, 27, 38, .18); }
-.choice-panel-title { margin-bottom: 16px; color: var(--text); text-align: center; font-size: 17px; font-weight: 600; }
-.choice-panel-options { display: flex; flex-direction: column; gap: 7px; }
-.vn-choice { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 11px; background: transparent; color: var(--text); text-align: left; cursor: pointer; transition: background .14s, border-color .14s, transform .14s; }
-.vn-choice:hover:not(:disabled) { border-color: color-mix(in srgb, var(--blue) 48%, var(--line)); background: var(--surface-soft); transform: translateX(2px); }
+.choice-layer { position: absolute; z-index: 4; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding: 24px 24px 44px; background: rgba(30, 38, 34, .055); }
+.choice-panel { width: min(760px, 100%); padding: 9px 20px 0; }
+.choice-panel-title { margin-bottom: 14px; color: var(--world-text); text-align: center; font-size: 15px; font-weight: 600; }
+.choice-panel-options { display: flex; flex-direction: column; gap: 0; }
+.vn-choice { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 11px 4px; border: 0; border-bottom: 1px solid rgba(70, 85, 78, .18); border-radius: 0; background: transparent; color: var(--world-muted); text-align: left; cursor: pointer; transition: color .16s, transform .16s; }
+.vn-choice:hover:not(:disabled) { border-color: rgba(70, 85, 78, .28); background: transparent; color: var(--world-text); transform: translateX(4px); }
 .vn-choice:disabled { opacity: .5; cursor: default; }
-.vn-choice-index { width: 22px; color: var(--blue); font-family: var(--code); font-size: 12px; }
-.choice-free-input { position: relative; display: flex; align-items: flex-end; margin-top: 14px; padding: 10px 46px 10px 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-soft); }
+.vn-choice-index { width: 22px; color: var(--accent); font-family: var(--code); font-size: 12px; }
+.choice-free-input { position: relative; display: flex; align-items: flex-end; margin-top: 17px; padding: 10px 46px 10px 13px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg-strong); box-shadow: 0 10px 30px rgba(20, 25, 25, .04); backdrop-filter: blur(18px) saturate(110%); }
 .choice-free-input textarea { width: 100%; min-height: 42px; resize: none; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; line-height: 1.6; }
 .choice-free-input textarea::placeholder { color: var(--caption); }
-.choice-send { position: absolute; right: 9px; bottom: 9px; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: var(--blue); color: white; cursor: pointer; }
+.choice-send { position: absolute; right: 9px; bottom: 9px; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: var(--accent); color: white; cursor: pointer; }
 .choice-send:disabled { opacity: .35; cursor: default; }
 
 /* Event tree */

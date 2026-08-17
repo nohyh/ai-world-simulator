@@ -37,7 +37,7 @@ export default function ChoicePanel({ choices = [], onSubmit, disabled = false }
           }} />
         <button type="button" className="choice-send" aria-label="发送" disabled={disabled || !input.trim()}
           onClick={() => submit(input)}>
-          <Icon name="send" size={16} />
+          <Icon name="arrow" size={16} />
         </button>
       </div>
     </section>
