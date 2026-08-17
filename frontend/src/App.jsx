@@ -10,6 +10,7 @@ import EventTreeTab from './components/EventTreeTab.jsx'
 import CharactersTab from './components/CharactersTab.jsx'
 import NewWorldModal from './components/NewWorldModal.jsx'
 import SettingsModal from './components/SettingsModal.jsx'
+import AmbientBackdrop from './components/AmbientBackdrop.jsx'
 
 function EmptyMain() {
   const openModal = useStore((s) => s.openModal)
@@ -50,6 +51,7 @@ export default function App() {
 
   return (
     <div className="shell">
+      <AmbientBackdrop />
       <Sidebar />
       <main className="main">
         <TopBar />
