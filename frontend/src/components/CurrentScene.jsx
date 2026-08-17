@@ -228,8 +228,11 @@ export default function CurrentScene() {
   return (
     <div className="current-scene">
       <div className="current-scene-head">
-        {time && <span className="mono chip">{time}</span>}
-        {place && <span className="chip dim">{place}</span>}
+        <div className="scene-location" aria-label="当前场景">
+          {time && <span>{time}</span>}
+          {time && place && <span className="scene-location-separator">·</span>}
+          {place && <span>{place}</span>}
+        </div>
       </div>
       <div className="current-scene-body">
         <BeatPlayer key={roundKey} beats={beats} serverDone={serverDone}

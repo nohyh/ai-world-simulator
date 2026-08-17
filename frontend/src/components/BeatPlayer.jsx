@@ -111,14 +111,16 @@ export default function BeatPlayer({
     <div className="vn-stage" onClick={handleStageClick} role="button" tabIndex={0}>
       <div className="vn-stage-spacer" />
       <div className={`vn-beat-frame ${activeBeat?.type === 'dialogue' ? 'dialogue' : 'narration'}`}>
-        {activeBeat?.speaker && <div className="vn-speaker">{activeBeat.speaker}</div>}
-        {activeBeat && (
-          <div className="vn-text">
-            {characters.slice(0, visibleCount).join('')}
-            {!revealed && <span className="vn-caret">▍</span>}
-          </div>
-        )}
-        {revealed && activeBeat && <div className="vn-advance-mark">▼</div>}
+        <div key={activeIndex} className="vn-beat-content">
+          {activeBeat?.speaker && <div className="vn-speaker">{activeBeat.speaker}</div>}
+          {activeBeat && (
+            <div className="vn-text">
+              {characters.slice(0, visibleCount).join('')}
+              {!revealed && <span className="vn-caret">▍</span>}
+            </div>
+          )}
+        </div>
+        {revealed && activeBeat && <div className="vn-advance-mark">⌄</div>}
       </div>
       {loadingDots && <div className="vn-loading-dots">· · ·</div>}
       {waitingForNext && <div className="vn-loading-dots vn-loading-dots-waiting">· · ·</div>}
