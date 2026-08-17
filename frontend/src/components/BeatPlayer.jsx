@@ -19,6 +19,7 @@ export default function BeatPlayer({
   pendingMeta,
   busy,
   initialLoading,
+  enabled = true,
   onChoiceReady,
 }) {
   const [activeIndex, setActiveIndex] = useState(-1)
@@ -73,6 +74,18 @@ export default function BeatPlayer({
     setAdvanceRequested(false)
     onChoiceReady(pendingMeta)
   }
+
+  useEffect(() => {
+    if (!enabled) return undefined
+    const handleKeyDown = (event) => {
+      if (event.target.closest('button, textarea, input, select, a, [data-stop-advance]')) return
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      requestAdvance()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  })
 
   const handleStageClick = (event) => {
     if (event.target.closest('button, textarea, input, select, a, [data-stop-advance]')) return

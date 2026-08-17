@@ -155,7 +155,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .composer-plus { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-soft); color: var(--text); }
 .hero-send { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; margin-left: auto; border-radius: 50%; background: #b9cef8; color: white; font-size: 23px; line-height: 1; }
 
-/* Selected-world header keeps the app's three existing tabs, but uses dsh's quiet toolbar treatment. */
+/* Selected-world header keeps the app's four workspace tabs, with dsh's quiet toolbar treatment. */
 .topbar { min-height: 56px; display: flex; align-items: center; gap: 16px; padding: 0 22px; border-bottom: 1px solid var(--line-soft); background: var(--surface); flex-shrink: 0; }
 .topbar-leading { min-width: 180px; }
 .topbar-kicker { color: var(--caption); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }

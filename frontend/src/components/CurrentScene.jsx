@@ -6,6 +6,7 @@ import ChoicePanel from './ChoicePanel.jsx'
 
 export default function CurrentScene() {
   const worldId = useStore((s) => s.worldId)
+  const enabled = useStore((s) => s.tab === 'current')
   const bumpWorlds = useStore((s) => s.bumpWorlds)
   const [beats, setBeats] = useState([])
   const [pendingMeta, setPendingMeta] = useState(null)
@@ -136,6 +137,7 @@ export default function CurrentScene() {
           <>
             <BeatPlayer key={roundKey} beats={beats} serverDone={serverDone}
               pendingMeta={pendingMeta} busy={busy} initialLoading={initialLoading}
+              enabled={enabled && !choiceVisible}
               onChoiceReady={() => setChoiceVisible(true)} />
             {choiceVisible && pendingMeta && (
               <div className="choice-layer">

@@ -13,7 +13,7 @@ export async function fetchJson(url, opts = {}) {
 
 /**
  * POST 一个 SSE 端点，按事件类型分发回调。
- * on: { delta, meta, done, error }；signal 用于中断流。
+ * on: { beat, meta, done, error }；signal 用于中断流。
  */
 export async function postSSE(url, body, on, signal) {
   const resp = await fetch(url, {
