@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { fetchJson } from '../api.js'
 import { useStore } from '../store.js'
 
@@ -53,33 +53,62 @@ export default function EventTreeTab() {
 
   const turns = data.turns || []
   const selected = selectedIndex === null ? null : turns[selectedIndex]
+  const groups = useMemo(() => {
+    const out = []
+    let current = null
+    turns.forEach((t) => {
+      const ch = t.chapter || 1
+      if (!current || current.chapter !== ch) {
+        current = { chapter: ch, meta: (data.chapters || []).find((c) => c.index === ch) || null, turns: [] }
+        out.push(current)
+      }
+      current.turns.push(t)
+    })
+    return out
+  }, [turns, data])
 
   return (
     <section className="view page-view tree-page">
       <header className="page-head"><h1>世界树</h1><div className="page-head-meta"><span className="meta">已探索路径</span><span className="meta">{turns.length} 个节点</span></div></header>
       {turns.length === 0 ? <p className="meta">还没有任何事件——先去当前场景开始冒险。</p> : (
         <div className="story-path">
-          {turns.map((turn, index) => {
-            const nextAction = turns[index + 1]?.player_action || ''
-            const choices = turn.meta?.choices || []
-            const isLatest = index === turns.length - 1
-            const isSelected = selectedIndex === index
-            const unexplored = choices.filter((choice) => choice !== nextAction)
+          {groups.map((group) => {
+            const groupEvents = (data.major_events || []).filter((ev) => Number(ev.chapter) === group.chapter)
             return (
-              <div className="path-step" key={`${index}-${turn.time_display || ''}`}>
-                <div className="path-time meta">{turn.time_display || '未知时间'}<span>{turn.meta?.place || '未知地点'}</span></div>
-                <div className={`path-marker ${isLatest ? 'is-current' : ''}`} />
-                <div className="path-content">
-                  <button className={`tree-node-main ${isSelected ? 'is-selected' : ''}`} type="button" onClick={() => setSelectedIndex(index)}>
-                    <span className="tree-node-title">{turn.player_action || '开局'}</span>
-                    <span className="tree-node-state">{isLatest ? '当前节点' : '已探索'}</span>
-                    <span className="tree-node-summary">{turn.narrative || '（没有可显示的叙事）'}</span>
-                  </button>
-                  {(unexplored.length > 0 || (nextAction && !choices.includes(nextAction))) && <div className="branch-cluster">
-                    {unexplored.map((choice, choiceIndex) => <UnexploredBranch choice={choice} index={choiceIndex} key={choice} />)}
-                    {nextAction && !choices.includes(nextAction) && <span className="tree-branch-taken"><span className="tree-branch-index">自由</span>{nextAction}</span>}
-                  </div>}
+              <div className="tree-chapter" key={`ch-${group.chapter}`}>
+                <div className="tree-chapter-head">
+                  <span className="tree-chapter-index">第 {group.chapter} 章</span>
+                  {group.meta?.title && <strong>{group.meta.title}</strong>}
+                  {group.meta?.time_scope && <span className="meta">{group.meta.time_scope}</span>}
+                  {group.meta?.location_scope && <span className="meta">{group.meta.location_scope}</span>}
                 </div>
+                {groupEvents.length > 0 && <div className="tree-major-events">{groupEvents.map((ev, i) => <span className="chip chip-major" key={`${group.chapter}-${i}`}>★ {ev.summary}</span>)}</div>}
+                {group.turns.map((turn, index) => {
+                  const nextAction = group.turns[index + 1]?.player_action || (turns[groups.indexOf(group) + 1]?.turns?.[0]?.player_action) || ''
+                  const globalIndex = turns.indexOf(turn)
+                  const choices = turn.meta?.choices || []
+                  const isLatest = globalIndex === turns.length - 1
+                  const isSelected = selectedIndex === globalIndex
+                  const died = turn.state_after?.character?.player?.status === '已死亡'
+                  const unexplored = choices.filter((choice) => choice !== nextAction)
+                  return (
+                    <div className="path-step" key={`${globalIndex}-${turn.time_display || ''}`}>
+                      <div className="path-time meta">{turn.time_display || '未知时间'}<span>{turn.meta?.place || '未知地点'}</span></div>
+                      <div className={`path-marker ${isLatest ? 'is-current' : ''} ${died ? 'is-death' : ''}`} />
+                      <div className="path-content">
+                        <button className={`tree-node-main ${isSelected ? 'is-selected' : ''} ${died ? 'is-death' : ''}`} type="button" onClick={() => setSelectedIndex(globalIndex)}>
+                          <span className="tree-node-title">{turn.player_action || '开局'}{died && <small className="tree-death-tag">已死亡</small>}</span>
+                          <span className="tree-node-state">{died ? '死亡 · 本章终止' : (isLatest ? '当前节点' : '已探索')}</span>
+                          <span className="tree-node-summary">{turn.narrative || '（没有可显示的叙事）'}</span>
+                        </button>
+                        {!died && (unexplored.length > 0 || (nextAction && !choices.includes(nextAction))) && <div className="branch-cluster">
+                          {unexplored.map((choice, choiceIndex) => <UnexploredBranch choice={choice} index={choiceIndex} key={choice} />)}
+                          {nextAction && !choices.includes(nextAction) && <span className="tree-branch-taken"><span className="tree-branch-index">自由</span>{nextAction}</span>}
+                        </div>}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )
           })}

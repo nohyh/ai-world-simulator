@@ -502,6 +502,12 @@ class GameSession:
         """
         st = self.state
         chapter = st.current_chapter or 1
+        # 幂等：下一章已存在则直接返回（断线重试 / 前端重载重复调用安全）。
+        for c in st.chapters:
+            if c.get("index") == chapter + 1:
+                summary = st.chapter_ends[-1].get("summary", "") if st.chapter_ends else ""
+                return {"chapter": chapter + 1, "summary": summary,
+                        "next_chapter": c.get("frame", {})}
         turns_text = "\n\n".join(
             (f"玩家：{t.get('player_action') or '（开局）'}\n{t.get('narrative') or ''}")
             for t in st.turns
@@ -571,12 +577,37 @@ class GameSession:
             "beats": list(t.get("beats") or []),
             "meta": t["meta"],
             "time_display": t["time_display"],
+            "chapter": t.get("chapter"),
             "attr_changes": dict(t.get("attr_changes") or {}),
             "item_changes": t.get("item_changes") or {"add": [], "remove": []},
             "state_after": snapshots[i] if i < len(snapshots) else None,
         } for i, t in enumerate(self.state.turns)]
+        current_chapter = self.state.chapters[-1] if self.state.chapters else None
+        chapter_ui = None
+        if current_chapter:
+            fr = current_chapter.get("frame") or {}
+            chapter_ui = {
+                "index": current_chapter.get("index") or 0,
+                "title": fr.get("title") or "",
+                "time_scope": fr.get("time_scope") or "",
+                "location_scope": fr.get("location_scope") or "",
+            }
+        major_events = [{"summary": e.get("summary"), "chapter": e.get("chapter")}
+                        for e in self.state.important_events if e.get("importance") == "major"]
+        chapter_meta = []
+        for c in self.state.chapters:
+            fr = c.get("frame") or {}
+            chapter_meta.append({
+                "index": c.get("index") or 0,
+                "title": fr.get("title") or "",
+                "time_scope": fr.get("time_scope") or "",
+                "location_scope": fr.get("location_scope") or "",
+            })
         return {
             "turns": turns,
             "state": self.state.drawer_snapshot(),
             "initial_attrs": dict((self.config.get("player") or {}).get("attrs") or {}),
+            "chapter": chapter_ui,
+            "chapters": chapter_meta,
+            "major_events": major_events,
         }

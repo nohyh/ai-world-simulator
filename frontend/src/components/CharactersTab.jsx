@@ -27,7 +27,11 @@ export default function CharactersTab() {
     const npcs = state.character?.npcs || []
     return [
       { id: 'player', name: player.name || '旅人', role: player.identity || '主角', state: '玩家视角', description: player.background || '这是你的角色。', player: true },
-      ...npcs.map((npc) => ({ id: npc.name, name: npc.name, role: npc.identity || npc.relationship || '已知人物', state: '当前可见', description: `你已经在故事中见过${npc.name}。`, npc })),
+      ...npcs.map((npc) => ({
+        id: npc.name, name: npc.name, role: npc.identity || '已知人物',
+        state: npc.status || '处境未知', age: npc.age,
+        description: (npc.age ? `${npc.age} 岁 · ` : '') + `你已经在故事中见过${npc.name}。`, npc,
+      })),
     ]
   }, [state])
 

@@ -373,6 +373,7 @@ class WorldState:
                     "name": n,
                     "identity": v["identity"],
                     "status": v["status"],
+                    "age": v["age"],
                 } for n, v in self.npcs.items() if n in self.seen_npcs],
             },
             "status": {

@@ -77,7 +77,7 @@ async def main():
         snap = st.drawer_snapshot()
         assert snap["character"]["player"]["name"] == "阿远"
         npc = next(n for n in snap["character"]["npcs"] if n["name"] == "陈医生")
-        assert set(npc.keys()) == {"name", "identity", "status"}, npc
+        assert set(npc.keys()) == {"name", "identity", "status", "age"}, npc
 
         # 重建一致
         row2 = db.get_world(wid)

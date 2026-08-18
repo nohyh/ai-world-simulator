@@ -23,6 +23,9 @@ export default function CurrentScene() {
   const [loadingDots, setLoadingDots] = useState(false)
   const [resumeAtEnd, setResumeAtEnd] = useState(false)
   const [recoveryRequest, setRecoveryRequest] = useState(null)
+  const [death, setDeath] = useState(false)
+  const [advancing, setAdvancing] = useState(false)
+  const [epoch, setEpoch] = useState(0)
   const abortRef = useRef(null)
   const submittingRef = useRef(false)
   const requestRef = useRef(null)
@@ -51,7 +54,43 @@ export default function CurrentScene() {
     setChoiceVisible(readyForChoice)
     setRecoveryRequest(null)
     setRoundKey((key) => key + 1)
+    void checkAfterTurn(payload)
     return true
+  }
+
+  // 回合落定后：章节达成则推进下一章；否则检测死亡。
+  const checkAfterTurn = async (payload) => {
+    const last = payload?.turns?.[payload.turns.length - 1]
+    const currentIndex = payload?.chapter?.index
+    if (last?.meta?.chapter_done?.done && currentIndex != null && Number(last.chapter) === Number(currentIndex)) {
+      setAdvancing(true)
+      try {
+        await fetchJson(`/api/game/${worldId}/chapter/advance`, { method: 'POST', body: '{}' })
+        setAdvancing(false)
+        setEpoch((e) => e + 1)
+      } catch (err) {
+        setAdvancing(false)
+        setError(err.message || '章节推进失败')
+      }
+      return
+    }
+    try {
+      const st = await fetchJson(`/api/game/${worldId}/state`)
+      setDeath(st?.character?.player?.status === '已死亡')
+    } catch { /* 静默：只在回合落定后轮询一次 */ }
+  }
+
+  const restartChapter = async () => {
+    setBusy(true)
+    try {
+      await fetchJson(`/api/game/${worldId}/restart-chapter`, { method: 'POST', body: '{}' })
+      setDeath(false)
+      setEpoch((e) => e + 1)
+    } catch (err) {
+      setError(err.message || '重新开始本章失败')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const reconcileFailure = async (message, request) => {
@@ -107,6 +146,7 @@ export default function CurrentScene() {
             }
           }
           bumpWorlds()
+          if (event.history) void checkAfterTurn(event.history)
         },
         error: (event) => {
           setBusy(false)
@@ -165,7 +205,7 @@ export default function CurrentScene() {
       abortRef.current?.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worldId])
+  }, [worldId, epoch])
 
   const submitAction = async (value) => {
     const action = String(value || '').trim()
@@ -229,6 +269,13 @@ export default function CurrentScene() {
     <div className="current-view">
       <div className="current-stage">
         <div className="stage-grain" aria-hidden="true" />
+        {history?.chapter && !death && (
+          <div className="chapter-banner">
+            <span className="chapter-badge">第 {history.chapter.index} 章 · {history.chapter.title}</span>
+            {history.chapter.time_scope && <span className="chapter-scope">{history.chapter.time_scope}</span>}
+            {history.chapter.location_scope && <span className="chapter-scope">{history.chapter.location_scope}</span>}
+          </div>
+        )}
         <div className="scene-context" aria-label="当前场景">
           <strong>{time || '故事开始'}</strong>
           <span>{place || '未知地点'}</span>
@@ -237,12 +284,20 @@ export default function CurrentScene() {
         <div className="current-content">
           <BeatPlayer key={roundKey} beats={beats} serverDone={serverDone}
             pendingMeta={pendingMeta} loadingDots={loadingDots} resumeAtEnd={resumeAtEnd}
-            enabled={enabled && !choiceVisible && !error}
+            enabled={enabled && !choiceVisible && !error && !death}
             onChoiceReady={() => setChoiceVisible(true)} />
-          {choiceVisible && pendingMeta && !error && (
+          {choiceVisible && pendingMeta && !error && !death && (
             <ChoicePanel choices={pendingMeta.choices || []} disabled={busy} onSubmit={submitAction} />
           )}
         </div>
+        {advancing && !death && <div className="chapter-advancing">正在生成下一章……</div>}
+        {death && !busy && (
+          <div className="death-overlay">
+            <h2>故事结束</h2>
+            <p>主角已经死亡，这条时间线走到了尽头。</p>
+            <button type="button" className="btn btn-primary" onClick={restartChapter}>重新开始本章</button>
+          </div>
+        )}
         {error && (
           <div className="scene-recovery">
             <div className="error">{error}</div>
