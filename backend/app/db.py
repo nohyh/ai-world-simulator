@@ -1,14 +1,20 @@
 """SQLite 存储：世界配置表 + 事件溯源表。
 
 事件类型（type 字段）：
-  TURN         一回合完整记录 {player_action, narrative, beats, choices, minutes, place, present, witnessed_by}
+  TURN         一回合完整记录 {player_action, narrative, beats, choices, minutes, place, present, witnessed_by, chapter}
   NPC_ADD      新 NPC 持久化 {npcs: {name: card}}
-  NPC_STATE    NPC 私有状态更新 {npcs: {name: {...}}}
+  NPC_STATE    NPC 当前状态更新 {npcs: {name: {status/current_thought/desire/personality}}}
   ATTR_CHANGE  玩家属性变化 {changes: {attr: delta}}
   ITEM_CHANGE  关键物品变化 {add: [], remove: []}
   WORLD_TICK   离屏世界推进 {minutes, developments: [], plot_pressure: str, npc_updates: {}}
   MAIN_PLOT_UPDATE 主线版本更新 {main_plot: str}
   CRYSTAL      记忆结晶 {layer, crystal, source_turn_count, source_world_tick_count}
+  REL_UPDATE       有向关系变化 {from, to, favor_delta, bond?, reason?}
+  QUALITY_UPDATE   品质变化（极少）{entity, changes:{质量:delta}}
+  IMPORTANT_EVENT  结构化重要事件 {summary, participants, witnessed_by, importance}
+  PLAYER_UPDATE    主角结构化更新（先承担 status: 已死亡）
+  CHAPTER          章节开始 {index, frame, start_seq}
+  CHAPTER_END      章节结束与总结 {index, summary, ...}
 """
 import json
 import sqlite3

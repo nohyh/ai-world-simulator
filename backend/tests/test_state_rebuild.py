@@ -236,3 +236,49 @@ def test_relationship_context_respects_budget():
     ], CONFIG)
     ctx = st.relationship_context(["长名甲乙"], budget=60)
     assert len(ctx) <= 60
+
+
+# ---------------- 新事件模型（阶段 3） ----------------
+
+def test_quality_update_clamps_and_only_touches_existing():
+    st = WorldState.rebuild([
+        ("QUALITY_UPDATE", {"entity": "陈医生", "changes": {"智力": 3, "不存在": 10}}),
+        ("QUALITY_UPDATE", {"entity": "陈医生", "changes": {"智力": 999}}),
+        ("QUALITY_UPDATE", {"entity": "神秘人", "changes": {"勇气": 1}}),
+    ], CONFIG)
+    assert st.npcs["陈医生"]["qualities"]["智力"] == 100
+    assert "不存在" not in st.npcs["陈医生"]["qualities"]
+    assert "神秘人" not in st.npcs
+
+
+def test_important_event_records_and_caps():
+    events = [("TURN", {"narrative": "n", "meta": {"minutes": 1, "present": ["陈医生"]}})]
+    events += [("IMPORTANT_EVENT",
+                {"summary": "关键转折%d" % i, "participants": ["陈医生"],
+                 "witnessed_by": ["陈医生"], "importance": "major"})
+               for i in range(12)]
+    st = WorldState.rebuild(events, CONFIG)
+    assert len(st.important_events) <= 8
+    assert st.important_events[-1]["summary"] == "关键转折11"
+    assert st.important_events[0]["witnessed_by"] == ["陈医生"]
+    assert st.important_events[0]["chapter"] == 0
+
+
+def test_player_update_death_sets_status():
+    st = WorldState.rebuild([
+        ("PLAYER_UPDATE", {"status": "已死亡"}),
+    ], CONFIG)
+    assert st.player["status"] == "已死亡"
+
+
+def test_chapter_events_track_current_and_stamp_turns():
+    st = WorldState.rebuild([
+        ("CHAPTER", {"index": 1, "frame": {"title": "逃离学校", "success_condition": "离开学校"}}),
+        ("TURN", {"narrative": "开篇", "meta": {"minutes": 10, "present": []}}),
+        ("CHAPTER_END", {"index": 1, "summary": "第一章结束"}),
+    ], CONFIG)
+    assert st.current_chapter == 1
+    assert st.turns[0]["chapter"] == 1
+    assert st.chapters[-1]["index"] == 1
+    assert st.chapters[-1]["frame"]["title"] == "逃离学校"
+    assert st.chapter_ends[-1]["summary"] == "第一章结束"

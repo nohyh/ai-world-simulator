@@ -21,6 +21,8 @@ CASCADE_BATCH = 4             # N 个 short 合 1 medium，依此类推
 WORLD_TICK_MIN_MINUTES = 60   # 累积未处理叙事时间达到该值才触发世界推进
 PLOT_PRESSURE_TURNS = 10      # 主线 N 回合无进展时注入压力提示
 MAX_NPC_UPDATE = 5            # 单回合最多更新的在场 NPC 数
+MAX_IMPORTANT_EVENTS = 8      # state 保留的重要事件条数（组件给叙事注入）
+MAX_CHAPTER_ENDS = 4          # state 保留的章末记录条数
 
 # ---- 记忆检索预算（字符数，近似 token 的两倍中文占比） ----
 MEMORY_BUDGET_CHARS = 2400

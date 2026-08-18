@@ -57,6 +57,7 @@ class WorldState:
             "background": p.get("background") or "",
             "attrs": dict(p.get("attrs") or {}),
             "key_items": list(p.get("key_items") or []),
+            "status": str(p.get("status") or "").strip(),
         }
         self.npcs = {}
         for card in config.get("npc_cards") or []:
@@ -97,6 +98,10 @@ class WorldState:
         self.turn_count = 0
         self.turns_since_plot = 0
         self.crystals = {"short": [], "medium": [], "long": [], "permanent": []}
+        self.important_events = []       # {summary, participants, witnessed_by, importance, chapter}
+        self.chapters = []               # {index, frame, start_seq}
+        self.chapter_ends = []           # {index, summary, ...}
+        self.current_chapter = 0
         self._short_crystal_count = 0
         self._turn_crystal_cursor = 0
         self.start_dt = parse_start_time(config.get("start_time"))
@@ -131,6 +136,7 @@ class WorldState:
                 "meta": meta,
                 "time_display": self.display_time(),
                 "witnessed_by": list(witnessed),
+                "chapter": self.current_chapter,
                 "attr_changes": {},
                 "item_changes": {"add": [], "remove": []},
             })
@@ -170,6 +176,22 @@ class WorldState:
             bond = str(data.get("bond") or "").strip()
             if bond:
                 cur["bond"] = bond
+        elif etype == "QUALITY_UPDATE":
+            entity = str(data.get("entity") or "").strip()
+            changes = data.get("changes") or {}
+            target = self.npcs.get(entity) if entity else None
+            if not target or not isinstance(changes, dict):
+                return
+            quals = target.setdefault("qualities", {})
+            for q, d in changes.items():
+                if not isinstance(q, str) or not q:
+                    continue
+                try:
+                    delta = int(d)
+                except (TypeError, ValueError):
+                    continue
+                if q in quals:
+                    quals[q] = max(0, min(100, int(quals[q]) + delta))
         elif etype == "ATTR_CHANGE":
             for k, d in (data.get("changes") or {}).items():
                 if k in self.player["attrs"]:
@@ -188,6 +210,35 @@ class WorldState:
                     self.player["key_items"].remove(it)
                     if self.turns:
                         self.turns[-1]["item_changes"]["remove"].append(it)
+        elif etype == "IMPORTANT_EVENT":
+            summary = str(data.get("summary") or "").strip()
+            if not summary:
+                return
+            self.important_events.append({
+                "summary": summary[:160],
+                "participants": list(data.get("participants") or []),
+                "witnessed_by": list(data.get("witnessed_by")
+                                    or data.get("participants") or []),
+                "importance": data.get("importance") if data.get("importance") in ("major", "minor") else "minor",
+                "chapter": self.current_chapter,
+            })
+            self.important_events = self.important_events[-C.MAX_IMPORTANT_EVENTS:]
+        elif etype == "PLAYER_UPDATE":
+            status = str(data.get("status") or "").strip()
+            if status:
+                self.player["status"] = status
+        elif etype == "CHAPTER":
+            index = int(data.get("index") or (self.current_chapter + 1))
+            self.current_chapter = index
+            frame = data.get("frame") if isinstance(data.get("frame"), dict) else {}
+            self.chapters.append({
+                "index": index,
+                "frame": frame,
+                "start_seq": data.get("start_seq"),
+            })
+        elif etype == "CHAPTER_END":
+            self.chapter_ends.append(dict(data))
+            self.chapter_ends = self.chapter_ends[-C.MAX_CHAPTER_ENDS:]
         elif etype == "WORLD_TICK":
             consumed = max(0, int(data.get("minutes") or 0))
             self.world_tick_pending_minutes = max(
