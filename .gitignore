@@ -22,4 +22,5 @@ output/
 
 # Test/temp artifacts.
 .pytest_tmp*/
+pytest-of-*/
 *.log
