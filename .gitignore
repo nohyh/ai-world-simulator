@@ -19,3 +19,7 @@ SillyTavern/
 .claude/
 .playwright-cli/
 output/
+
+# Test/temp artifacts.
+.pytest_tmp/
+*.log
