@@ -9,6 +9,8 @@
 """
 import json
 
+from . import config as C
+
 META_SENTINEL = "[[META]]"
 META_END = "[[END]]"
 DEFAULT_CHOICES = ["观察周围环境", "谨慎采取行动"]
@@ -68,12 +70,46 @@ dialogue 必须填写 speaker。speaker 可以是玩家标准名称、【已知 
 其中 choices 2~4 个、每个不超过 22 个字，行动导向、风格多样；minutes 为本回合剧情流逝的分钟数；place/present 同前。npc_updates / quality_updates / relationship_updates / important_event / player_update 等全是稀疏补丁：只有本回合确实发生、且值得被记住的状态或关系变化才输出对应字段，没有变化就省略；这就是同一作者顺手记账，不要为了填而填。本回合首次命名且确实会持续存在的角色，用"new_npcs"字段给出其人物卡（姓名/年龄/身份/status/qualities/personality/desire/background/current_thought）。"""
 
 
-def narrator_user_message(state_block, memory_block, relationship_block, thread_block, history_block, action):
+def chapter_block(frame):
+    if not frame:
+        return ""
+    return ("【当前章节】\n" +
+            f"时间范围：{frame.get('time_scope') or '未限定'}\n" +
+            f"地点范围：{frame.get('location_scope') or '未限定'}\n" +
+            f"本章主题：{frame.get('theme') or '探索这个世界'}\n" +
+            f"成功条件：{frame.get('success_condition') or '玩家自己探索出的结局'}\n" +
+            f"失败条件：{frame.get('failure_condition') or '主角死亡'}\n" +
+            "规则：在本章范围内玩家完全自由，不规定具体方法；"
+            "不要主动把故事带离本章范围或转向无关的长期主题；"
+            "当玩家实际达成成功条件时，在 META 中把 chapter_done.done 设为 true 并写明 reason；"
+            "当玩家在本章死亡时，把 player_update.status 设为「已死亡」。")
+
+
+def events_block(important_events, budget=C.EVENT_BLOCK_BUDGET_CHARS):
+    if not important_events:
+        return ""
+    lines = []
+    used = 0
+    for ev in important_events:
+        line = ("★ " if ev.get("importance") == "major" else "- ") + (ev.get("summary") or "")
+        if used + len(line) + 1 > budget:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    if not lines:
+        return ""
+    return "【重要事件】（本世界值得一提的过去事实）\n" + "\n".join(lines)
+
+
+def narrator_user_message(state_block, chapter_block, memory_block, relationship_block,
+                          events_block, thread_block, history_block, action):
     return f"""【当前世界状态】
 {state_block}
 
+{chapter_block}
 {memory_block}
 {relationship_block}
+{events_block}
 {thread_block}
 {history_block}
 【玩家行动】
@@ -209,9 +245,14 @@ NPC_CARDS_SYSTEM = """你是游戏世界构筑器。MOCK:npccards
  "relationships": [
    {"from": "角色A", "to": "角色B", "favor": 0~100 的整数, "bond": "一句关系本质总结"}
  ],
+ "first_chapter": {
+   "title": "章节名", "time_scope": "时间范围", "location_scope": "地点范围",
+   "theme": "本章主题", "success_condition": "达成什么即本章结束",
+   "failure_condition": "通常为：主角死亡"
+ },
  "main_plot": "一条 30~60 字的主线：世界正在发生什么、什么在逼近或崩塌"
 }
-要求：姓名使用原文专名；qualities 不规定固定模板，按角色设定生成 3~5 项合理的 0~100 量级数值；desire 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；status 与 current_thought 都要反映开局处境；relationships 只列出开局真正存在或重要的有向关系（通常是与主角之间，或关键 NPC 之间），不建全连矩阵；favor 是 0~100 的亲疏，bond 比数值更重要，用一句话说明关系的本质。"""
+要求：姓名使用原文专名；qualities 不规定固定模板，按角色设定生成 3~5 项合理的 0~100 量级数值；desire 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；status 与 current_thought 都要反映开局处境；relationships 只列出开局真正存在或重要的有向关系（通常是与主角之间，或关键 NPC 之间），不建全连矩阵；favor 是 0~100 的亲疏，bond 比数值更重要，用一句话说明关系的本质；first_chapter 用一句话描述开局的时间/地点/主题，success_condition 只写「达成什么即本章结束」（重状态，不重情节步骤）。"""
 
 
 def npc_cards_user_message(world_setting, important_people):
@@ -290,6 +331,47 @@ def tick_user_message(minutes, severity, state_summary, threads, main_plot, npc_
 {npc_context or '（无）'}
 
 请生成离屏世界变化。"""
+
+
+# ---------------------------------------------------------------- 章节规划（章末，主模型）
+
+CHAPTER_SYSTEM = """你是世界模拟器的章节规划者。MOCK:chapter
+
+当前一章已经结束。请做两件事：1) 用一小段话总结本章发生了什么；2) 规划下一章的框架。
+你只负责章节内容的总结与规划，绝不修改任何人物状态——人物状态只由叙事者在故事中修改。
+
+严格输出 JSON（不要任何其他文字）：
+{
+ "chapter_summary": "本章最重要的情节总结（200 字内）",
+ "next_chapter": {
+   "title": "章节名",
+   "time_scope": "下一章的时间范围",
+   "location_scope": "下一章的地点范围",
+   "theme": "下一章主题（一句话）",
+   "success_condition": "成功条件：主角达成什么即本章结束",
+   "failure_condition": "失败条件：通常为 主角死亡"
+ }
+}
+要求：next_chapter 要承接本章未解决的线索与世界暗流，但不要凭空引入无关的新主线；时间/地点可以是「数月后」「另一座城市」这类范围描述；章节之间保留因果连续。"""
+
+
+def chapter_planner_user_message(turns_text, important_events, relationship_snapshot, threads, main_plot):
+    return f"""【本章已发生的剧情】
+{turns_text or '（本章尚无玩家回合）'}
+
+【本章重要事件】
+{important_events or '（无）'}
+
+【当前人物关系（仅供参考上下文，不可改动）】
+{relationship_snapshot or '（无）'}
+
+【世界暗流】
+{threads or '（无）'}
+
+【总主线】
+{main_plot or '（未定）'}
+
+请总结本章并规划下一章。"""
 
 
 # ---------------------------------------------------------------- 共享工具

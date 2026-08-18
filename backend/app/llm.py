@@ -295,6 +295,14 @@ def _mock_aux_reply(messages):
                 {"from": "陈医生", "to": "老周", "favor": 60,
                  "bond": "多年搭档，互相掩护"},
             ],
+            "first_chapter": {
+                "title": "逃离学校",
+                "time_scope": "灾难爆发当天上午至下午",
+                "location_scope": "学校及其紧邻区域",
+                "theme": "想办法逃离已经失控的学校",
+                "success_condition": "主角真正离开学校",
+                "failure_condition": "主角死亡",
+            },
             "main_plot": "北方的武装集团正在逼近避难所，水源与粮食只够支撑五天。",
         }, ensure_ascii=False)
     if "MOCK:npcmind" in joined:
@@ -317,5 +325,17 @@ def _mock_aux_reply(messages):
         return json.dumps({
             "developments": ["北方的武装集团又前进了十公里，侦察兵回报他们似乎在寻找什么。"],
             "plot_pressure": "敌方逼近的速度在加快。",
+        }, ensure_ascii=False)
+    if "MOCK:chapter" in joined:
+        return json.dumps({
+            "chapter_summary": "第一章：主角在灾难爆发的当天设法离开了失控的学校。",
+            "next_chapter": {
+                "title": "城北避难所",
+                "time_scope": "当天晚间",
+                "location_scope": "城北城区与临时避难所",
+                "theme": "逃出学校的人必须找到真正能过夜的安全地点",
+                "success_condition": "主角获得一个暂时稳定的落脚点",
+                "failure_condition": "主角死亡",
+            },
         }, ensure_ascii=False)
     return "{}"

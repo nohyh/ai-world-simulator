@@ -143,19 +143,28 @@ class Database:
             self._conn.commit()
 
     # ---- 事件 ----
-    def append_event(self, wid, etype, data):
+    def append_event(self, wid, etype, data, stamp_seq=False):
         now = time.time()
         with self._lock:
             row = self._conn.execute(
                 "SELECT COALESCE(MAX(seq), 0) FROM events WHERE world_id=?", (wid,)
             ).fetchone()
             seq = row[0] + 1
+            if stamp_seq:
+                data = {**data, "seq": seq}
             self._conn.execute(
                 "INSERT INTO events (world_id, seq, type, data, created_at) VALUES (?,?,?,?,?)",
                 (wid, seq, etype, json.dumps(data, ensure_ascii=False), now),
             )
             self._conn.commit()
         return seq
+
+    def truncate_events_after(self, wid, seq):
+        """删除 seq 之后（含 seq 之后）的全部事件——用于「本章重开」纯时间线回滚。"""
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM events WHERE world_id=? AND seq > ?", (wid, seq))
+            self._conn.commit()
 
     def get_events(self, wid):
         with self._lock:

@@ -234,7 +234,7 @@ class WorldState:
             self.chapters.append({
                 "index": index,
                 "frame": frame,
-                "start_seq": data.get("start_seq"),
+                "start_seq": data.get("seq") or data.get("start_seq"),
             })
         elif etype == "CHAPTER_END":
             self.chapter_ends.append(dict(data))

@@ -97,6 +97,7 @@ class GameSession:
         self._loop = None
         self._closed = False
         self.death = False
+        self.chapter_done_pending = None
 
     # ================= 对外：开篇 =================
     async def ensure_opening(self):
@@ -350,9 +351,13 @@ class GameSession:
                      for name in st.present if name in st.npcs}
         state_text = prompts.state_block(
             st.player, st.npcs, st.display_time(), st.place, st.present, knowledge)
+        frame = st.chapters[-1]["frame"] if st.chapters else (self.config.get("first_chapter") or {})
+        chapter_text = prompts.chapter_block(frame)
         rel_text = prompts.relationship_block(st.relationship_context(st.present))
+        ev_text = prompts.events_block(st.important_events)
         thread_text = prompts.thread_block(st.main_plot, pressure, st.world_threads)
-        fixed_chars = len(state_text) + len(thread_text) + len(action) + 180
+        fixed_chars = (len(state_text) + len(chapter_text) + len(rel_text) + len(ev_text)
+                       + len(thread_text) + len(action) + 220)
         available = max(0, C.CONTEXT_BUDGET_CHARS - fixed_chars)
         memory_budget = min(C.MEMORY_BUDGET_CHARS, available)
         mem_segments = self.mem.build_context(query, st.present, budget=memory_budget)
@@ -363,8 +368,10 @@ class GameSession:
 
         return prompts.narrator_user_message(
             state_text,
+            chapter_text,
             mem_block,
             rel_text,
+            ev_text,
             thread_text,
             prompts.history_block(st.recent_turns(), budget=history_budget),
             action,
@@ -401,7 +408,18 @@ class GameSession:
                         "bond": str(rel.get("bond") or "").strip()[:120],
                     })
             self.config["initial_relationships"] = cleaned
+            fc = obj.get("first_chapter")
+            first_chapter = None
+            if isinstance(fc, dict) and str(fc.get("title") or "").strip():
+                first_chapter = {k: str(fc.get(k) or "").strip()
+                                 for k in ("title", "time_scope", "location_scope",
+                                           "theme", "success_condition", "failure_condition")}
+            if first_chapter:
+                self.config["first_chapter"] = first_chapter
             self.db.save_world_config(self.world_id, self.config)
+            if first_chapter:
+                # 记录第一章起始（stamp 固化 seq，供「本章重开」回滚）。
+                self._append("CHAPTER", {"index": 1, "frame": first_chapter}, stamp_seq=True)
             self.state = WorldState.rebuild(self.db.get_events(self.world_id), self.config)
             self.mem = MemoryEngine(self.state.crystals)
         except Exception:
@@ -472,12 +490,76 @@ class GameSession:
             # 主线有实质推进 → 重置主线压力计数。
             if plot_update:
                 self._append("PLOT_PROGRESS", {})
+        cd = meta.get("chapter_done")
+        if cd and cd.get("done"):
+            self.chapter_done_pending = cd
 
-    def _append(self, etype, data):
+    # ================= 章节（阶段 6/7） =================
+    async def advance_chapter(self):
+        """章末：主模型一次性生成 章节总结 + 下一章框架。
+
+        严格约束：绝不修改任何人物/关系/状态——只产出章节边界事件。
+        """
+        st = self.state
+        chapter = st.current_chapter or 1
+        turns_text = "\n\n".join(
+            (f"玩家：{t.get('player_action') or '（开局）'}\n{t.get('narrative') or ''}")
+            for t in st.turns
+            if int(t.get("chapter") or chapter) == chapter and t.get("narrative"))
+        events_text = "\n".join(f"- {e.get('summary') or ''}" for e in st.important_events[-6:])
+        rel_text = st.relationship_context(list(st.npcs))
+        threads_text = "\n".join(st.world_threads[-4:]) or ""
+        try:
+            raw = await self.llm.chat(
+                [{"role": "system", "content": prompts.CHAPTER_SYSTEM},
+                 {"role": "user", "content": prompts.chapter_planner_user_message(
+                     turns_text, events_text, rel_text, threads_text, st.main_plot)}],
+                aux=False,          # 主模型：下一章讲什么是核心创作决策
+                max_tokens=1200)
+            obj = _loads(raw) or {}
+            summary = str(obj.get("chapter_summary") or "").strip()[:400]
+            nxt = obj.get("next_chapter") if isinstance(obj.get("next_chapter"), dict) else {}
+            if not summary:
+                summary = f"第{chapter}章结束。"
+            if not str(nxt.get("title") or "").strip():
+                nxt = {"title": f"第{chapter + 1}章", "time_scope": "", "location_scope": "",
+                       "theme": "继续在这片世界探索，直面未解决之事",
+                       "success_condition": "主角达成新的目标",
+                       "failure_condition": "主角死亡"}
+            idx = chapter + 1
+            self._append("CHAPTER_END", {"index": chapter, "summary": summary})
+            self._append("CHAPTER", {"index": idx, "frame": nxt}, stamp_seq=True)
+            self.chapter_done_pending = None
+            return {"chapter": idx, "summary": summary, "next_chapter": nxt}
+        except Exception:
+            logger.exception("Chapter planning failed")
+            return None
+
+    # ================= 死亡 / 本章重开（阶段 8） =================
+    async def restart_chapter(self):
+        """删除当前章开始之后的全部事件，重建世界（纯时间线回滚）。"""
+        chapter = self.state.current_chapter
+        start_seq = None
+        for etype, data in self.db.get_events(self.world_id):
+            if etype == "CHAPTER":
+                try:
+                    if int(data.get("index") or 0) == chapter:
+                        start_seq = data.get("seq") or data.get("start_seq")
+                except (TypeError, ValueError):
+                    continue
+        if start_seq is None:
+            start_seq = 1
+        await self.close()
+        _sessions.pop(self.world_id, None)
+        self.db.truncate_events_after(self.world_id, start_seq)
+        row = self.db.get_world(self.world_id)
+        return get_session(self.world_id, row, self.db)
+
+    def _append(self, etype, data, stamp_seq=False):
         if self._closed:
             logger.warning("Ignoring %s event for closed world %s", etype, self.world_id)
             return None
-        seq = self.db.append_event(self.world_id, etype, data)
+        seq = self.db.append_event(self.world_id, etype, data, stamp_seq=stamp_seq)
         self.state.apply(etype, data)
         return seq
 

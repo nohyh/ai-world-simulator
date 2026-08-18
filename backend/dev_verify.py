@@ -86,8 +86,26 @@ async def main():
         assert s3.state.turn_count == 3
         assert set(s3.state.npcs) == set(st.npcs)
         assert s3.state.npcs["陈医生"]["current_thought"] == st.npcs["陈医生"]["current_thought"]
-        print("V2-SMOKE-OK turns=%d npcs=%s rels=%d" % (st.turn_count, list(st.npcs), len(st.relationships)))
-        print("  card_sample:", {k: st.npcs["陈医生"][k] for k in ("status", "desire", "current_thought")})
+        assert s3.state.current_chapter == 1              # 第一章框架来自 mock 提取
+        assert s3.state.chapters[0]["frame"]["title"] == "逃离学校"
+
+        # 章节边界（阶段 6/7/8，走真实 mock）：达成→规划下一章→本章重开
+        s3._commit_turn({"player_action": "离开学校", "narrative": "你终于离开了学校。",
+                         "beats": [], "meta": {
+                             "choices": ["a", "b"], "minutes": 30, "place": "校门外",
+                             "present": [], "chapter_done": {"done": True, "reason": "已达成功条件"}}})
+        adv = await s3.advance_chapter()
+        assert adv is not None and adv["chapter"] == 2
+        assert s3.state.current_chapter == 2
+        assert s3.state.chapter_ends[-1]["index"] == 1
+        s4 = await s3.restart_chapter()
+        assert s4.state.current_chapter == 2
+        # 「本章重开」= 回滚当前章（第 2 章）起点，第一章历史保留。
+        assert s4.state.turn_count == 4   # 第一章 3 回合 + 达成回合
+
+        print("V2-SMOKE-OK turns=%d npcs=%s rels=%d chapter=%d" % (
+            s4.state.turn_count if s4 else st.turn_count, list(s4.state.npcs), len(s4.state.relationships), s4.state.current_chapter))
+        print("  card_sample:", {k: s4.state.npcs["陈医生"][k] for k in ("status", "desire", "current_thought")})
     finally:
         drop_session(wid)
         try:

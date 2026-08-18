@@ -256,3 +256,22 @@ async def game_action(wid: str, body: ActionRequest):
     s = _session(wid)
     # 副作用任务留在后台；下一次行动开始前由 process_action 内部等待回收
     return _sse(s.process_action(body.input))
+
+
+@router.post("/game/{wid}/chapter/advance")
+async def chapter_advance(wid: str):
+    s = _session(wid)
+    result = await s.advance_chapter()
+    if result is None:
+        raise HTTPException(502, "章节规划失败，请重试")
+    await s._drain_side_effects(timeout=30)
+    return result
+
+
+@router.post("/game/{wid}/restart-chapter")
+async def restart_chapter(wid: str):
+    s = _session(wid)
+    s2 = await s.restart_chapter()
+    return {"chapter": s2.state.current_chapter,
+            "turn_count": s2.state.turn_count,
+            "history": s2._history_payload()}

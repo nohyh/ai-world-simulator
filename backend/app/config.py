@@ -28,6 +28,7 @@ MAX_CHAPTER_ENDS = 4          # state 保留的章末记录条数
 MEMORY_BUDGET_CHARS = 2400
 NPC_KNOWLEDGE_BUDGET_CHARS = 1800
 RELATIONSHIP_BUDGET_CHARS = 1200  # 【人物关系】块的最大字符预算
+EVENT_BLOCK_BUDGET_CHARS = 800    # 【重要事件】块的最大字符预算
 CONTEXT_BUDGET_CHARS = 12000  # 单次叙事 user context 的硬字符预算
 PER_LAYER_TOP_K = 3
 
