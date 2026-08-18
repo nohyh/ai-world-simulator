@@ -256,17 +256,28 @@ def _mock_aux_reply(messages):
     if "MOCK:npccards" in joined:
         return json.dumps({
             "npcs": [
-                {"name": "陈医生", "identity": "避难所的医疗官", "personality": "冷静、惜字如金，背负着过去的错误",
-                 "relationship": "信任的同伴", "goal": "找到失踪的医疗队", "secret_plan": "隐瞒自己已被感染"},
-                {"name": "老周", "identity": "老猎人", "personality": "务实、嘴硬心软",
-                 "relationship": "旧识", "goal": "保住避难所里的孩子们", "secret_plan": ""},
+                {"name": "陈医生", "age": 38, "identity": "避难所的医疗官",
+                 "status": "右臂受伤，正在医务室处理伤患",
+                 "qualities": {"智力": 78, "医疗": 85, "勇气": 60},
+                 "personality": "冷静、惜字如金，背负着过去的错误",
+                 "desire": "找到失踪的医疗队",
+                 "background": "曾在北方军区医院任职",
+                 "current_thought": "医疗队失踪三天了，不能再拖下去。"},
+                {"name": "老周", "age": 52, "identity": "老猎人",
+                 "status": "正在清点弹药",
+                 "qualities": {"力量": 72, "追踪": 80, "勇气": 65},
+                 "personality": "务实、嘴硬心软",
+                 "desire": "保住避难所里的孩子们",
+                 "background": "在山里打了三十年的猎",
+                 "current_thought": "粮最多撑五天，得尽快找条出路。"},
             ],
             "main_plot": "北方的武装集团正在逼近避难所，水源与粮食只够支撑五天。",
         }, ensure_ascii=False)
     if "MOCK:npcmind" in joined:
         return json.dumps({
-            "npcs": {"陈医生": {"feeling": "焦虑而克制", "goal": "找到失踪的医疗队",
-                              "opinion_of_player": "可靠的决策者", "secret_plan": "隐瞒感染"}},
+            "npcs": {"陈医生": {"status": "仍在医务室忙碌",
+                               "current_thought": "这个主角或许值得信任。",
+                               "desire": "找到失踪的医疗队"}},
             "plot_advanced": random.choice([True, False]),
             "player_attr_changes": {},
             "key_item_changes": {"add": [], "remove": []},

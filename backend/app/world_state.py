@@ -8,20 +8,20 @@ from datetime import datetime, timedelta
 from . import config as C
 
 
+_PATCHABLE_NPC_FIELDS = ("status", "personality", "desire", "current_thought")
+
+
 def _npc_state(card):
-    try:
-        feeling_turn = int(card.get("feeling_turn") or -1)
-    except (TypeError, ValueError):
-        feeling_turn = -1
     return {
+        "name": str(card.get("name") or "").strip(),
+        "age": card.get("age") or "",
         "identity": card.get("identity") or "",
+        "status": card.get("status") or "",
+        "qualities": dict(card.get("qualities") or {}),
         "personality": card.get("personality") or "",
-        "relationship": card.get("relationship") or "陌生",
-        "goal": card.get("goal") or "",
-        "secret_plan": card.get("secret_plan") or "",
-        "opinion_of_player": card.get("opinion_of_player") or "",
-        "feeling": card.get("feeling") or "",
-        "feeling_turn": feeling_turn,
+        "desire": card.get("desire") or "",
+        "background": card.get("background") or "",
+        "current_thought": card.get("current_thought") or "",
     }
 
 
@@ -122,13 +122,12 @@ class WorldState:
         elif etype == "NPC_STATE":
             for name, fields in (data.get("npcs") or {}).items():
                 npc = self.npcs.get(name)
-                if not npc:
+                if not npc or not isinstance(fields, dict):
                     continue
-                for k, v in fields.items():
-                    if k in npc:
-                        npc[k] = v
-                if "feeling" in fields:
-                    npc["feeling_turn"] = self.turn_count
+                for k in _PATCHABLE_NPC_FIELDS:
+                    v = fields.get(k)
+                    if isinstance(v, str) and v.strip():
+                        npc[k] = v.strip()
         elif etype == "NPC_ADD":
             for name, card in (data.get("npcs") or {}).items():
                 name = str(name).strip()
@@ -176,11 +175,10 @@ class WorldState:
                 npc = self.npcs.get(name)
                 if not npc or not isinstance(fields, dict):
                     continue
-                for key, value in fields.items():
-                    if key in npc:
-                        npc[key] = value
-                if "feeling" in fields:
-                    npc["feeling_turn"] = self.turn_count
+                for k in _PATCHABLE_NPC_FIELDS:
+                    v = fields.get(k)
+                    if isinstance(v, str) and v.strip():
+                        npc[k] = v.strip()
         elif etype == "MAIN_PLOT_UPDATE":
             plot = str(data.get("main_plot") or "").strip()
             if plot:
@@ -227,11 +225,6 @@ class WorldState:
     def pending_crystal_world_ticks(self):
         return self.world_tick_events[self._world_tick_crystal_cursor:]
 
-    def decay_feelings(self):
-        for npc in self.npcs.values():
-            if npc["feeling"] and self.turn_count - npc["feeling_turn"] > C.FEELING_DECAY_TURNS:
-                npc["feeling"] = ""
-
     def npc_knowledge_window(self, name, budget=C.NPC_KNOWLEDGE_BUDGET_CHARS):
         """Return only the recent turn history this NPC actually witnessed.
 
@@ -263,10 +256,11 @@ class WorldState:
         return {
             "character": {
                 "player": dict(self.player),
+                # 玩家视角只暴露最基本信息：身份/年龄/现状。关系、内心、品质全部隐藏。
                 "npcs": [{
                     "name": n,
                     "identity": v["identity"],
-                    "relationship": v["relationship"],
+                    "status": v["status"],
                 } for n, v in self.npcs.items() if n in self.seen_npcs],
             },
             "status": {

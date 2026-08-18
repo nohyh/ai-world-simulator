@@ -22,9 +22,10 @@ def _loads(raw):
 
 
 def npc_section(name, npc, can_know):
-    return (f"### {name}\n身份：{npc['identity']}\n与玩家关系：{npc['relationship']}\n"
-            f"当前心智——情绪：{npc['feeling'] or '未记录'}；目标：{npc['goal'] or '未记录'}；"
-            f"对玩家看法：{npc['opinion_of_player'] or '未记录'}；秘密计划：{npc['secret_plan'] or '无'}\n"
+    return (f"### {name}\n身份：{npc['identity']}\n年龄：{npc.get('age') or '未知'}\n"
+            f"现状：{npc['status'] or '正常'}\n性格：{npc['personality'] or '未知'}\n"
+            f"愿望：{npc['desire'] or '未知'}\n"
+            f"当前想法：{npc['current_thought'] or '未记录'}\n"
             f"【他可知的信息】{can_know}")
 
 
@@ -59,7 +60,7 @@ async def update_minds(llm, npcs, present, action, narrative, player_attrs,
         if name not in names or not isinstance(fields, dict):
             continue
         upd = {}
-        for key in ("feeling", "goal", "opinion_of_player", "relationship", "secret_plan"):
+        for key in ("status", "current_thought", "desire", "personality"):
             v = fields.get(key)
             if isinstance(v, str) and v.strip():
                 upd[key] = v.strip()[:120]
@@ -74,13 +75,15 @@ async def update_minds(llm, npcs, present, action, narrative, player_attrs,
         if not name or name not in unknown_names or name in new_npcs:
             continue
         new_npcs[name] = {
+            "age": str(card.get("age") or "").strip()[:20],
             "identity": str(card.get("identity") or "未知来客").strip()[:80],
+            "status": str(card.get("status") or "").strip()[:120],
+            "qualities": {k: v for k, v in (card.get("qualities") or {}).items()
+                          if isinstance(v, (int, float))},
             "personality": str(card.get("personality") or "").strip()[:120],
-            "relationship": str(card.get("relationship") or "陌生").strip()[:80],
-            "goal": str(card.get("goal") or "").strip()[:120],
-            "secret_plan": str(card.get("secret_plan") or "").strip()[:120],
-            "opinion_of_player": str(card.get("opinion_of_player") or "").strip()[:120],
-            "feeling": str(card.get("feeling") or "").strip()[:120],
+            "desire": str(card.get("desire") or "").strip()[:120],
+            "background": str(card.get("background") or "").strip()[:200],
+            "current_thought": str(card.get("current_thought") or "").strip()[:120],
         }
     plot_advanced = bool(obj.get("plot_advanced"))
     main_plot_update = str(obj.get("main_plot_update") or "").strip()[:240]

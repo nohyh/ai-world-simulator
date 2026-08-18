@@ -41,9 +41,9 @@ async def world_tick(llm, minutes, main_plot, state_summary, threads,
     npc_lines = []
     for name, npc in offscreen_npcs.items():
         npc_lines.append(
-            f"- {name}：身份 {npc.get('identity', '')}；关系 {npc.get('relationship', '')}；"
-            f"目标 {npc.get('goal', '') or '未记录'}；秘密计划 {npc.get('secret_plan', '') or '无'}；"
-            f"当前情绪 {npc.get('feeling', '') or '未记录'}；对玩家看法 {npc.get('opinion_of_player', '') or '未记录'}"
+            f"- {name}：身份 {npc.get('identity', '')}；现状 {npc.get('status', '') or '正常'}；"
+            f"性格 {npc.get('personality', '') or '未知'}；愿望 {npc.get('desire', '') or '未记录'}；"
+            f"当前想法 {npc.get('current_thought', '') or '未记录'}"
         )
     try:
         raw = await llm.chat(
@@ -66,7 +66,7 @@ async def world_tick(llm, minutes, main_plot, state_summary, threads,
         if name not in allowed or not isinstance(fields, dict):
             continue
         update = {}
-        for key in ("feeling", "goal", "opinion_of_player", "secret_plan"):
+        for key in ("status", "current_thought", "desire"):
             value = fields.get(key)
             if isinstance(value, str) and value.strip():
                 update[key] = value.strip()[:120]

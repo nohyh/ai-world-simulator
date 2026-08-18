@@ -6,10 +6,14 @@ CONFIG = {
         "attrs": {"力量": 50, "智力": 60}, "key_items": [],
     },
     "npc_cards": [
-        {"name": "陈医生", "identity": "医疗官", "personality": "冷静",
-         "relationship": "信任", "goal": "找医疗队", "secret_plan": "隐瞒感染"},
-        {"name": "老周", "identity": "老猎人", "personality": "嘴硬",
-         "relationship": "旧识", "goal": "", "secret_plan": ""},
+        {"name": "陈医生", "age": 45, "identity": "医疗官",
+         "status": "右臂受伤", "qualities": {"智力": 80, "医疗": 85},
+         "personality": "冷静", "desire": "找医疗队",
+         "background": "军区医院出身", "current_thought": "医疗队还没回来"},
+        {"name": "老周", "age": 60, "identity": "老猎人",
+         "status": "清点弹药", "qualities": {"力量": 70, "追踪": 82},
+         "personality": "嘴硬", "desire": "护住孩子",
+         "background": "山里猎人", "current_thought": "粮快不够了"},
     ],
     "main_plot": "铁鸦集团逼近",
     "start_time": "2041年7月16日 08:00",
@@ -52,25 +56,25 @@ def test_rebuild_side_effect_events():
     st = WorldState.rebuild([
         ("TURN", {"player_action": None, "narrative": "开篇",
                   "meta": {"minutes": 0, "place": "避难所", "present": ["陈医生", "老周"]}}),
-        ("NPC_STATE", {"npcs": {"陈医生": {"feeling": "焦虑", "secret_plan": "隐瞒感染加剧"}}}),
+        ("NPC_STATE", {"npcs": {"陈医生": {"status": "焦急地翻看地图", "current_thought": "必须尽快找到医疗队"}}}),
         ("ATTR_CHANGE", {"changes": {"力量": -2, "不存在的属性": 5}}),
         ("ITEM_CHANGE", {"add": ["染血的地图"], "remove": []}),
         ("WORLD_TICK", {"developments": ["铁鸦前进了十公里"], "plot_pressure": "逼近中"}),
         ("CRYSTAL", {"layer": "short", "crystal": {"summary": "开篇与地图"}}),
         ("PLOT_PROGRESS", {}),
     ], CONFIG)
-    assert st.npcs["陈医生"]["feeling"] == "焦虑"
-    assert st.npcs["陈医生"]["secret_plan"] == "隐瞒感染加剧"
+    assert st.npcs["陈医生"]["status"] == "焦急地翻看地图"
+    assert st.npcs["陈医生"]["current_thought"] == "必须尽快找到医疗队"
     assert st.player["attrs"]["力量"] == 48
     assert "不存在的属性" not in st.player["attrs"]
     assert st.player["key_items"] == ["染血的地图"]
     assert st.world_threads == ["铁鸦前进了十公里"]
     assert st.plot_pressure == "逼近中"
     assert st.turns_since_plot == 0
-    # 抽屉只暴露玩家视角：秘密不外泄
+    # 抽屉只暴露玩家视角：内心/品质/关系不外泄
     snap = st.drawer_snapshot()
     npc = [n for n in snap["character"]["npcs"] if n["name"] == "陈医生"][0]
-    assert "secret_plan" not in npc and "goal" not in npc
+    assert "current_thought" not in npc and "desire" not in npc and "qualities" not in npc
     assert snap["world"] == {}
     assert "main_plot" not in snap["world"]
 
@@ -81,7 +85,8 @@ def test_new_npc_event_persists_and_exposes_seen_character():
                   "meta": {"minutes": 1, "present": ["苏晴"]}}),
         ("NPC_ADD", {"npcs": {
             "苏晴": {"identity": "调查员", "personality": "谨慎",
-                     "relationship": "陌生", "goal": "寻找线索"}
+                     "desire": "寻找线索", "status": "打量着房间",
+                     "current_thought": "这个避难所不对劲"}
         }}),
     ], CONFIG)
     assert st.npcs["苏晴"]["identity"] == "调查员"
@@ -107,10 +112,11 @@ def test_world_tick_accumulates_and_consumes_narrative_minutes():
     st.apply("WORLD_TICK", {
         "minutes": 65,
         "developments": [],
-        "npc_updates": {"陈医生": {"goal": "赶往北岭", "feeling": "焦虑"}},
+        "npc_updates": {"陈医生": {"desire": "赶往北岭", "status": "焦急"}},
     })
     assert st.world_tick_pending_minutes == 0
-    assert st.npcs["陈医生"]["goal"] == "赶往北岭"
+    assert st.npcs["陈医生"]["desire"] == "赶往北岭"
+    assert st.npcs["陈医生"]["status"] == "焦急"
 
     st.apply("WORLD_TICK", {"minutes": 0, "developments": [], "plot_pressure": ""})
     assert st.plot_pressure == ""

@@ -153,7 +153,6 @@ class GameSession:
             yield {"type": "error", "message": "世界尚未开局，请先调用 start"}
             return
 
-        self.state.decay_feelings()
         msgs = [
             {"role": "system", "content": self._narrator_system()},
             {"role": "user", "content": self._narrator_user(action)},
@@ -407,7 +406,7 @@ class GameSession:
     def _npc_cards_desc(self):
         lines = []
         for n, v in self.state.npcs.items():
-            lines.append(f"- {n}：{v['identity']}；与玩家关系：{v['relationship']}")
+            lines.append(f"- {n}：{v['identity']}；现状：{v['status'] or '正常'}；愿望：{v['desire'] or '未知'}")
         return "\n".join(lines) or "（无初始人物，请根据世界设定自行安排）"
 
     # ================= 持久化与杂项 =================

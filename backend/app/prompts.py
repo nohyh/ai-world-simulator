@@ -30,7 +30,7 @@ NARRATOR_SYSTEM = """你是一个沉浸式中文文字世界模拟引擎的叙�
 1. 只用中文写作，第二人称"你"指代玩家。禁止出戏、禁止任何 meta 说明、禁止罗列选项之外的分析。
 2. 后果是真实的。玩家的输入只是一次【尝试】：他想做什么由他决定，实际发生什么由世界状态、他的能力、资源与环境决定。玩家说"我造火箭飞去月球"，你要按一个资源匮乏的普通人试图造火箭来演绎后果，而不是让他成功。
 3. 玩家属性是成败倾向的依据（属性见状态块），但不显式引用数字。力量 20 的人搬不动巨石，魅力高的人更容易说服他人。
-4. NPC 是活人：他们有自己的目标、情绪与秘密，会主动说话和行动，不等玩家推动才存在。但每个 NPC 只能引用他自己可能知道的信息（各 NPC 状态块中【可知】标注的范围），绝不泄露他不可能知道的事。近期历史、长期记忆和世界暗流是叙事者上下文，不代表任何 NPC 自动知道；写 NPC 台词或行动时只能使用该 NPC 的【可知】范围。
+4. NPC 是活人：他们有自己的性格、愿望、想法与处境（见各 NPC 状态块），会主动说话和行动，不等玩家推动才存在；他们的内心、关系与数值只属于叙事者参考，永远不得在正文中直接旁白给读者。但每个 NPC 只能引用他自己可能知道的信息（各 NPC 状态块中【可知】标注的范围），绝不泄露他不可能知道的事。近期历史、长期记忆和世界暗流是叙事者上下文，不代表任何 NPC 自动知道；写 NPC 台词或行动时只能使用该 NPC 的【可知】范围。
 5. 篇幅自适应：快节奏的动作往来可以只有一两句话甚至十几个字；重要对话、场景转换、剧情推进可以写二三百字。总体宁精勿滥。
 6. 保持既有事实的连续性，不得与记忆、历史、状态冲突。专名（人名、地名、组织名）永远保持原样。present 中的已知 NPC 必须使用【已知 NPC 标准名称】里的原名，不得改成简称、称谓或同义变体；首次出现的新 NPC 可以在本回合首次命名，但从命名开始必须保持同一名字。
 7. 世界有内在压力：若【主线压力】提示存在，务必让它以合理方式渗入剧情，但不必每回合都直白展现。
@@ -87,14 +87,15 @@ def state_block(player, npcs, time_display, place, present, knowledge_by_npc=Non
             n = npcs.get(name)
             if not n:
                 continue
-            pub = f"身份：{n['identity']}；性格：{n['personality']}；与玩家关系：{n['relationship']}"
+            quals = "、".join(f"{k} {v}" for k, v in (n.get("qualities") or {}).items()) or "（未设定）"
+            lines.append(f"- {name}：身份：{n['identity']}；年龄：{n.get('age') or '未知'}；"
+                         f"性格：{n['personality'] or '未知'}")
+            lines.append(f"  现状：{n['status'] or '正常'}")
+            lines.append(f"  品质：{quals}")
+            lines.append(f"  愿望：{n['desire'] or '未知'}")
+            lines.append(f"  当前想法：{n['current_thought'] or '无记录'}")
             known = knowledge_by_npc.get(name) or "（没有目击到更早的相关事件；只能使用本回合亲历内容）"
-            priv = (f"【仅叙事者可知，玩家与其它 NPC 不可知】此刻心理：{n['feeling'] or '不明'}；"
-                    f"目标：{n['goal'] or '不明'}；对玩家看法：{n['opinion_of_player'] or '不明'}；"
-                    f"秘密计划：{n['secret_plan'] or '无'}")
-            lines.append(f"- {name}：{pub}")
             lines.append(f"  【{name} 可知的历史】\n  {known}")
-            lines.append(f"  【私有心智，仅叙事者可见】{priv}")
     else:
         lines.append("在场 NPC：无（独处）")
     return "\n".join(lines)
@@ -170,13 +171,17 @@ NPC_CARDS_SYSTEM = """你是游戏世界构筑器。MOCK:npccards
 严格输出 JSON（不要任何其他文字）：
 {
  "npcs": [
-   {"name": "姓名", "identity": "一句话身份", "personality": "性格与说话风格",
-    "relationship": "与玩家的初始关系", "goal": "此人的目标或动机",
-    "secret_plan": "他隐藏的秘密或计划，没有则留空字符串"}
+   {"name": "姓名", "age": 年龄数字, "identity": "一句话身份",
+    "status": "开局处境，如：右臂受伤，正在和主角一起行动",
+    "qualities": {"智力": 70, "力量": 50, "勇气": 60},
+    "personality": "性格与说话风格",
+    "desire": "此人的愿望、执念或长期目标",
+    "background": "进入当前故事以前的重要经历",
+    "current_thought": "此刻心里最重要的一两句话"}
  ],
  "main_plot": "一条 30~60 字的主线：世界正在发生什么、什么在逼近或崩塌"
 }
-要求：姓名使用原文专名；goal 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；secret_plan 只有在设定确实支持秘密或隐性计划时才填写，普通 NPC 可以留空，不要为了戏剧性硬造。"""
+要求：姓名使用原文专名；qualities 不规定固定模板，按角色设定生成 3~5 项合理的 0~100 量级数值；desire 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；status 与 current_thought 都要反映开局处境。"""
 
 
 def npc_cards_user_message(world_setting, important_people):
@@ -191,19 +196,19 @@ def npc_cards_user_message(world_setting, important_people):
 
 NPC_MIND_SYSTEM = """你是世界模拟器的后台状态更新器。MOCK:npcmind
 
-根据本回合剧情，更新在场 NPC 的私有心智，并判断玩家属性/物品是否发生值得记录的变化。
+根据本回合剧情，更新在场 NPC 的当前状态，并判断玩家属性/物品是否发生值得记录的变化。
 每个 NPC 只能基于他自己可知晓的信息更新（他不在场的事他不知道）。【本回合剧情】和【他可知的信息】之外的内容一律不可当作记忆。
 
 严格输出 JSON（不要任何其他文字）：
 {
  "npcs": {
-   "NPC名": {"feeling": "此刻情绪（短语）", "goal": "当前目标（可保持原值）",
-             "opinion_of_player": "对玩家的看法（短语）", "relationship": "与玩家关系（有变化才填）",
-             "secret_plan": "秘密计划（可保持原值）"}
+   "NPC名": {"status": "新的处境（有变化才填）", "current_thought": "此刻最重要的一两句话（可更新）",
+             "desire": "愿望/目标（有实质变化才填）", "personality": "性格（只在重大成长时才填）"}
  },
  "new_npcs": [
-   {"name": "本回合首次出现且在 present 中的 NPC", "identity": "身份", "personality": "性格",
-    "relationship": "与玩家关系", "goal": "目标", "secret_plan": "秘密计划；没有则留空"}
+   {"name": "姓名", "age": 年龄, "identity": "身份", "status": "处境",
+    "qualities": {"智力": 65}, "personality": "性格", "desire": "愿望",
+    "background": "经历", "current_thought": "此刻想法"}
  ],
  "main_plot_update": "如主线发生了可确认的实质变化，给出更新后的主线；没有变化则留空字符串",
  "plot_advanced": true/false,
@@ -211,6 +216,7 @@ NPC_MIND_SYSTEM = """你是世界模拟器的后台状态更新器。MOCK:npcmin
  "key_item_changes": {"add": ["获得的关键物品"], "remove": ["失去的关键物品"]}
 }
 规则：当前主线会在用户消息中明确给出。plot_advanced 只表示当前 main_plot 本身发生了实质推进（获得关键主线信息、化解当前主线威胁、改变主线冲突等）；人物关系、恋爱进展或普通好感变化本身不算主线推进，除非它直接改变当前主线冲突。main_plot_update 只在主线表述需要更新时填写完整的新主线，否则留空；new_npcs 只填写本回合确实首次出现、且 narrator 的 present 已列出的未知人物，不要凭空扩充人物表；
+status/current_thought 可以有正常变化，但必须由当前剧情和已有事实自然支持；personality/desire/qualities 是低频字段，只在发生真正重大变化时更新；
 属性变化只在显著事件时给出（长期训练、重伤、领悟），每次至多 2 项、幅度 ≤3；
 key_item 只记录对剧情有意义的物品（关键道具、信物、武器），不要记普通消耗品；
 没有变化就输出空对象，不要硬凑。"""
@@ -268,11 +274,11 @@ TICK_SYSTEM = """你是世界模拟器的离屏推进器。MOCK:tick
  "developments": ["离屏发生的变化，1~3 条，每条一句话"],
  "plot_pressure": "对主线压力的一句话描述（威胁更近了/暂时缓和/出现变数），没有则留空",
  "npc_updates": {{
-   "NPC名": {{"feeling": "新的情绪（没有变化则留空）", "goal": "新的目标（没有变化则留空）",
-               "opinion_of_player": "新的看法（没有变化则留空）", "secret_plan": "新的秘密计划（没有变化则留空）"}}
+   "NPC名": {{"status": "新的处境（没有变化则留空）", "current_thought": "新的想法（没有变化则留空）",
+               "desire": "新的愿望（没有变化则留空）"}}
  }}
 }}
-规则：保持克制，一次只推进一到两个主要发展；不开新谜团、不引入新命名角色（可以用群体指代）；只更新确实在离屏时间内行动过的 NPC，普通 NPC 的字段可以全部留空；不要凭空给普通 NPC 添加秘密；
+规则：保持克制，一次只推进一到两个主要发展；不开新谜团、不引入新命名角色（可以用群体指代）；关系的大幅改变尽量通过实际剧情表达，不要在此凭空调整；只更新确实在离屏时间内行动过的 NPC，普通 NPC 的字段可以全部留空；
 变化要与现有暗流和主线因果连续；跳跃时间越长、等级越高，变化可以越大，但仍须合理。"""
 
 

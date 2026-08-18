@@ -76,7 +76,7 @@ async def test_full_game_flow(tmp_path, monkeypatch):
         names = {n["name"] for n in snap["character"]["npcs"]}
         assert {"陈医生", "老周"} <= names
         for n in snap["character"]["npcs"]:
-            assert "secret_plan" not in n and "goal" not in n
+            assert "current_thought" not in n and "desire" not in n and "qualities" not in n
         assert snap["status"]["time"].startswith("2041年7月16日")
 
         # 5) 事件溯源重建 == 内存态
