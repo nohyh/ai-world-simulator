@@ -1,6 +1,8 @@
 """全部中文 prompt。系统的灵魂所在，改动需谨慎。
 
-叙事主调用的输出协议：正文先流式输出，然后另起一行输出结构化块：
+叙事主调用的输出协议：逐行输出语义 Beat，然后另起一行输出结构化块：
+<beat type="narration">……</beat>
+<beat type="dialogue" speaker="人物名">……</beat>
 [[META]]
 {"choices": [...], "minutes": N, "place": "...", "present": [...]}
 [[END]]
@@ -30,11 +32,17 @@ NARRATOR_SYSTEM = """你是一个沉浸式中文文字世界模拟引擎的叙�
 3. 玩家属性是成败倾向的依据（属性见状态块），但不显式引用数字。力量 20 的人搬不动巨石，魅力高的人更容易说服他人。
 4. NPC 是活人：他们有自己的目标、情绪与秘密，会主动说话和行动，不等玩家推动才存在。但每个 NPC 只能引用他自己可能知道的信息（各 NPC 状态块中【可知】标注的范围），绝不泄露他不可能知道的事。近期历史、长期记忆和世界暗流是叙事者上下文，不代表任何 NPC 自动知道；写 NPC 台词或行动时只能使用该 NPC 的【可知】范围。
 5. 篇幅自适应：快节奏的动作往来可以只有一两句话甚至十几个字；重要对话、场景转换、剧情推进可以写二三百字。总体宁精勿滥。
-6. 保持既有事实的连续性，不得与记忆、历史、状态冲突。专名（人名、地名、组织名）永远保持原样。present 中的已知人物必须使用【已知人物标准名称】里的原名，不得改成简称、称谓或同义变体；首次出现的新人物也必须从首次命名开始保持同一名字。
+6. 保持既有事实的连续性，不得与记忆、历史、状态冲突。专名（人名、地名、组织名）永远保持原样。present 中的已知 NPC 必须使用【已知 NPC 标准名称】里的原名，不得改成简称、称谓或同义变体；首次出现的新 NPC 可以在本回合首次命名，但从命名开始必须保持同一名字。
 7. 世界有内在压力：若【主线压力】提示存在，务必让它以合理方式渗入剧情，但不必每回合都直白展现。
 
 【输出格式】（严格遵守）
-先直接输出剧情正文，不要任何前缀。正文结束后，另起一行输出：
+先逐行输出剧情 Beat，不要任何前缀。每个 beat 必须完整占一行，beat 内禁止换行；一个 beat 只表达一个自然叙事节拍，通常 20~80 个汉字，不要为了凑长度拆句，也不要输出过长段落。
+可用的 Beat 只有两种：
+<beat type="narration">旁白或行动</beat>
+<beat type="narration" speaker="人物标准名称">某人物的独立动作、神态或其他玩家可感知表现</beat>
+<beat type="dialogue" speaker="人物标准名称">台词</beat>
+dialogue 必须填写 speaker。speaker 可以是玩家标准名称、【已知 NPC 标准名称】中的原名，或本回合首次命名的新 NPC；已知名称不得改写。narration 在没有明确主体时省略 speaker，有明确人物的可观察动作、神态或表现可以填写 speaker；不得借 narration 透露人物未说出口的想法、计划、秘密或心理。present 只填写本回合结束时在场的 NPC，不填写玩家；已知 NPC 使用原名，新 NPC 首次命名后保持同名。
+正文结束后，另起一行输出：
 [[META]]
 {{"choices": ["……", "……", "……"], "minutes": 30, "place": "当前地点", "present": ["在场NPC名"]}}
 [[END]]
@@ -65,9 +73,13 @@ def state_block(player, npcs, time_display, place, present, knowledge_by_npc=Non
         f"关键物品：{items}",
     ]
     known_names = list(npcs)
-    lines.append("【已知人物标准名称】\n" +
+    lines.append("【已知 NPC 标准名称】\n" +
                  ("、".join(known_names) if known_names else "（暂无）") +
-                 "\npresent 字段必须使用以上标准名称。")
+                 "\npresent 只放 NPC；已知 NPC 必须使用以上标准名称，新 NPC 可以在剧情中首次命名。")
+    lines.append("【可用说话者】\n" +
+                 f"玩家：{player['name']}\n" +
+                 "已知 NPC：" + ("、".join(known_names) if known_names else "（暂无）") +
+                 "\n本回合可以在 Beat 中首次命名新 NPC，命名后后续 Beat 必须保持同名。")
     knowledge_by_npc = knowledge_by_npc or {}
     if present:
         lines.append("在场 NPC：")
@@ -145,7 +157,7 @@ def opening_user_message(world_setting, rules, tone, player, npcs_desc, start_ti
         parts.append(f"\n【用户补充设定（与世界规则同等效力）】\n{notes}")
     parts.append("\n请生成开篇：把玩家自然地放进这个世界的一个具体场景中（不要流水账介绍设定），"
                  "场景中至少有一名初始人物在场，结尾留下明确的戏剧张力。"
-                 "正文 300~500 字，然后按输出格式给出 [[META]] 块。")
+                 "正文 300~500 字，拆成多个语义 Beat，然后按输出格式给出 [[META]] 块。")
     return "\n".join(parts)
 
 

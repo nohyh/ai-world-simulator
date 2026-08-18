@@ -74,7 +74,7 @@ class WorldState:
         self.world_tick_events = []
         self.world_tick_count = 0
         self._world_tick_crystal_cursor = 0
-        self.turns = []           # {player_action, narrative, meta, time_display}
+        self.turns = []           # {player_action, narrative, beats, meta, time_display}
         self.time_minutes = 0
         self.world_tick_pending_minutes = 0
         self.place = config.get("start_place") or "未知地点"
@@ -112,6 +112,7 @@ class WorldState:
             self.turns.append({
                 "player_action": data.get("player_action"),
                 "narrative": data.get("narrative") or "",
+                "beats": list(data.get("beats") or []),
                 "meta": meta,
                 "time_display": self.display_time(),
                 "witnessed_by": list(witnessed),

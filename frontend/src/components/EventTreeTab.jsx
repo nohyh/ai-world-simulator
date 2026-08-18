@@ -2,76 +2,35 @@ import { useEffect, useState } from 'react'
 import { fetchJson } from '../api.js'
 import { useStore } from '../store.js'
 
-const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥']
-
-function ChoiceChip({ taken, children }) {
-  return (
-    <span
-      className={`tchoice ${taken ? 'taken' : 'fog'}`}
-      title={taken ? '已探索' : '未探索路线'}
-    >
-      {taken ? '✓' : '◌'} {taken ? children : '未探索路线'}
-    </span>
-  )
-}
-
 function NodeDetail({ turn, index, onClose }) {
   const snapshot = turn.state_after
   const status = snapshot?.status || {}
   const characters = snapshot?.character?.npcs || []
   const attrs = Object.entries(status.attrs || {})
   const items = status.key_items || []
-
   return (
-    <aside className="node-detail">
-      <div className="node-detail-head">
-        <div>
-          <div className="tree-sec mono">探索节点 {index + 1}</div>
-          <div className="node-detail-title">{turn.player_action || '开局'}</div>
+    <>
+      <button className="tree-inspector-backdrop is-open" type="button" aria-label="关闭节点详情" onClick={onClose} />
+      <aside className="tree-detail is-open" aria-label="节点详情">
+        <div className="tree-detail-head"><div><p className="meta">探索节点 {index + 1}</p><h2>{turn.player_action || '开局'}</h2></div><button className="close-button" type="button" aria-label="关闭详情" onClick={onClose}>×</button></div>
+        <p className="tree-detail-summary">{turn.narrative || '（没有可显示的叙事）'}</p>
+        <div className="tree-detail-grid">
+          <div><p className="tree-detail-label">时间 / 地点</p><p className="tree-detail-value">{status.time || turn.time_display || '未知时间'} · {status.place || turn.meta?.place || '未知地点'}</p></div>
+          <div><p className="tree-detail-label">玩家行动</p><p className="tree-detail-value">{turn.player_action || '开局'}</p></div>
         </div>
-        <button type="button" className="icon-btn" title="关闭详情" onClick={onClose}>×</button>
-      </div>
-      <div className="node-detail-story">{turn.narrative}</div>
-      <div className="node-detail-grid">
-        <div>
-          <span className="node-detail-label">时间</span>
-          <span>{status.time || turn.time_display}</span>
-        </div>
-        <div>
-          <span className="node-detail-label">地点</span>
-          <span>{status.place || '未知地点'}</span>
-        </div>
-      </div>
-      {attrs.length > 0 && (
-        <div className="node-detail-section">
-          <div className="tree-sec mono">状态</div>
-          <div className="node-detail-chips">
-            {attrs.map(([name, value]) => <span key={name} className="chip">{name} {value}</span>)}
-          </div>
-        </div>
-      )}
-      {items.length > 0 && (
-        <div className="node-detail-section">
-          <div className="tree-sec mono">关键物品</div>
-          <div className="node-detail-chips">
-            {items.map((item) => <span key={item} className="chip">{item}</span>)}
-          </div>
-        </div>
-      )}
-      {characters.length > 0 && (
-        <div className="node-detail-section">
-          <div className="tree-sec mono">已见人物</div>
-          <div className="node-detail-chips">
-            {characters.map((character) => <span key={character.name} className="chip">{character.name}</span>)}
-          </div>
-        </div>
-      )}
-      <div className="node-detail-hint">首版只支持查看节点状态，不会从这里创建新的剧情分支。</div>
-    </aside>
+        {attrs.length > 0 && <div className="tree-detail-section"><p className="tree-detail-label">公开属性</p><div className="tree-detail-chips">{attrs.map(([name, value]) => <span className="chip" key={name}>{name} {value}</span>)}</div></div>}
+        {items.length > 0 && <div className="tree-detail-section"><p className="tree-detail-label">关键物品</p><div className="tree-detail-chips">{items.map((item) => <span className="chip" key={item}>{item}</span>)}</div></div>}
+        {characters.length > 0 && <div className="tree-detail-section"><p className="tree-detail-label">已见人物</p><div className="tree-detail-chips">{characters.map((character) => <span className="chip" key={character.name}>{character.name}</span>)}</div></div>}
+        <p className="tree-detail-note">当前版本支持查看已探索节点。回到节点并从历史继续探索将在分支写入接口稳定后开放。</p>
+      </aside>
+    </>
   )
 }
 
-/** 剧情树：展示已探索回合，并把未选择的选项渲染为不可进入的迷雾节点。 */
+function UnexploredBranch({ choice, index }) {
+  return <span className="tree-branch-fog" title="未探索路线"><span className="tree-branch-index">{String(index + 1).padStart(2, '0')}</span>{choice}</span>
+}
+
 export default function EventTreeTab() {
   const worldId = useStore((s) => s.worldId)
   const tab = useStore((s) => s.tab)
@@ -81,85 +40,52 @@ export default function EventTreeTab() {
 
   useEffect(() => {
     if (tab !== 'tree') return
+    let cancelled = false
     setData(null)
     setError('')
     setSelectedIndex(null)
-    fetchJson(`/api/game/${worldId}/history`).then(setData).catch((e) => setError(e.message))
+    fetchJson(`/api/game/${worldId}/history`).then((payload) => { if (!cancelled) setData(payload) }).catch((event) => { if (!cancelled) setError(event.message || '载入剧情树失败') })
+    return () => { cancelled = true }
   }, [worldId, tab])
 
-  if (error) return <div className="page-pad"><div className="error">{error}</div></div>
-  if (!data) return <div className="page-pad sidebar-hint">载入剧情树……</div>
+  if (error) return <section className="view page-view"><div className="error">{error}</div></section>
+  if (!data) return <section className="view page-view"><div className="meta">载入世界树……</div></section>
 
-  const { turns } = data
+  const turns = data.turns || []
   const selected = selectedIndex === null ? null : turns[selectedIndex]
 
   return (
-    <div className="page-pad tree">
-      {turns.length === 0 && <div className="sidebar-hint">还没有任何事件——先去剧情页开始冒险。</div>}
-
-      {selected && (
-        <NodeDetail
-          turn={selected}
-          index={selectedIndex}
-          onClose={() => setSelectedIndex(null)}
-        />
-      )}
-
-      <div className="timeline">
-        {turns.map((turn, index) => {
-          const nextAction = turns[index + 1]?.player_action || ''
-          const isLatest = index === turns.length - 1
-          const isSelected = selectedIndex === index
-          const choices = turn.meta?.choices || []
-          const hasFreeNextAction = !!nextAction && !choices.includes(nextAction)
-          return (
-            <div key={index} className={`tnode ${isLatest ? 'latest' : ''} ${isSelected ? 'selected' : ''}`}>
-              <div className="tnode-rail"><span className="tnode-dot" /></div>
-              <div
-                className="tnode-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedIndex(index)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') setSelectedIndex(index)
-                }}
-              >
-                <div className="tnode-meta mono">
-                  <span>{turn.time_display}</span>
-                  {turn.meta?.place && <span className="dim"> · {turn.meta.place}</span>}
-                  {turn.meta?.minutes ? <span className="dim"> · +{turn.meta.minutes}min</span> : null}
-                  {isLatest && <span className="chip now">现在</span>}
+    <section className="view page-view tree-page">
+      <header className="page-head"><h1>世界树</h1><div className="page-head-meta"><span className="meta">已探索路径</span><span className="meta">{turns.length} 个节点</span></div></header>
+      {turns.length === 0 ? <p className="meta">还没有任何事件——先去当前场景开始冒险。</p> : (
+        <div className="story-path">
+          {turns.map((turn, index) => {
+            const nextAction = turns[index + 1]?.player_action || ''
+            const choices = turn.meta?.choices || []
+            const isLatest = index === turns.length - 1
+            const isSelected = selectedIndex === index
+            const unexplored = choices.filter((choice) => choice !== nextAction)
+            return (
+              <div className="path-step" key={`${index}-${turn.time_display || ''}`}>
+                <div className="path-time meta">{turn.time_display || '未知时间'}<span>{turn.meta?.place || '未知地点'}</span></div>
+                <div className={`path-marker ${isLatest ? 'is-current' : ''}`} />
+                <div className="path-content">
+                  <button className={`tree-node-main ${isSelected ? 'is-selected' : ''}`} type="button" onClick={() => setSelectedIndex(index)}>
+                    <span className="tree-node-title">{turn.player_action || '开局'}</span>
+                    <span className="tree-node-state">{isLatest ? '当前节点' : '已探索'}</span>
+                    <span className="tree-node-summary">{turn.narrative || '（没有可显示的叙事）'}</span>
+                  </button>
+                  {(unexplored.length > 0 || (nextAction && !choices.includes(nextAction))) && <div className="branch-cluster">
+                    {unexplored.map((choice, choiceIndex) => <UnexploredBranch choice={choice} index={choiceIndex} key={choice} />)}
+                    {nextAction && !choices.includes(nextAction) && <span className="tree-branch-taken"><span className="tree-branch-index">自由</span>{nextAction}</span>}
+                  </div>}
                 </div>
-                <div className="tnode-action">
-                  {turn.player_action
-                    ? <><span className="pa-label">你</span>{turn.player_action}</>
-                    : <span className="mono dim">开局</span>}
-                </div>
-                <div className="tnode-summary">{turn.narrative}</div>
-                {choices.length > 0 && (
-                  <div className="tnode-choices">
-                    {choices.map((choice, choiceIndex) => (
-                      <ChoiceChip key={choice} taken={choice === nextAction}>
-                        {CIRCLED[choiceIndex] || `${choiceIndex + 1}.`} {choice}
-                      </ChoiceChip>
-                    ))}
-                    {hasFreeNextAction && <span className="tchoice free">自由行动</span>}
-                  </div>
-                )}
-                {(Object.keys(turn.attr_changes || {}).length > 0 || turn.item_changes?.add?.length > 0 || turn.item_changes?.remove?.length > 0) && (
-                  <div className="tnode-deltas mono">
-                    {Object.entries(turn.attr_changes || {}).map(([name, value]) => (
-                      <span key={name} className={`delta ${value > 0 ? 'up' : 'down'}`}>{name} {value > 0 ? `+${value}` : value}</span>
-                    ))}
-                    {(turn.item_changes?.add || []).map((item) => <span key={`add-${item}`} className="delta item">＋{item}</span>)}
-                    {(turn.item_changes?.remove || []).map((item) => <span key={`remove-${item}`} className="delta item down">－{item}</span>)}
-                  </div>
-                )}
               </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
+            )
+          })}
+        </div>
+      )}
+      {selected && <NodeDetail turn={selected} index={selectedIndex} onClose={() => setSelectedIndex(null)} />}
+    </section>
   )
 }

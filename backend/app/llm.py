@@ -22,7 +22,10 @@ class LLMConfig:
     def __init__(self, d=None):
         d = d or {}
         self.provider = d.get("provider") or C.DEFAULT_PROVIDER
-        self.base_url = (d.get("base_url") or C.DEFAULT_BASE_URL).rstrip("/")
+        raw_base_url = d.get("base_url") or C.DEFAULT_BASE_URL
+        self.base_url, inferred_mode = normalize_api_url(raw_base_url)
+        requested_mode = str(d.get("api_mode") or "").strip().lower()
+        self.api_mode = requested_mode if requested_mode in {"chat", "completion"} else inferred_mode
         self.api_key = d.get("api_key") or ""
         self.model = d.get("model") or C.DEFAULT_MODEL
         self.aux_model = d.get("aux_model") or d.get("model") or C.DEFAULT_AUX_MODEL
@@ -34,18 +37,96 @@ class LLMConfig:
 
     def public(self):
         return {"provider": self.provider, "base_url": self.base_url,
-                "model": self.model, "aux_model": self.aux_model}
+                "model": self.model, "aux_model": self.aux_model,
+                "api_mode": self.api_mode}
+
+
+def normalize_api_url(value):
+    """Normalize either an API base URL or a completion endpoint URL.
+
+    Users commonly paste one of these forms:
+      https://host/v1
+      https://host/v1/chat/completions
+      https://host/v1/completions
+    Keep the version prefix and infer the request protocol from an explicit
+    endpoint suffix.  The caller adds endpoint paths without a leading slash
+    so httpx preserves a prefix such as ``/v1``.
+    """
+    url = str(value or "").strip().rstrip("/")
+    lower = url.lower()
+    for suffix, mode in (("/chat/completions", "chat"), ("/completions", "completion"), ("/models", "chat")):
+        if lower.endswith(suffix):
+            return url[:-len(suffix)].rstrip("/"), mode
+    return url, "chat"
+
+
+def _client_base_url(value):
+    return str(value or "").rstrip("/") + "/"
+
+
+def _completion_prompt(messages):
+    blocks = []
+    for message in messages:
+        role = str(message.get("role") or "user").upper()
+        blocks.append(f"{role}:\n{message.get('content') or ''}")
+    return "\n\n".join(blocks) + "\n\nASSISTANT:\n"
+
+
+async def fetch_models(base_url, api_key=""):
+    """Fetch model ids from an OpenAI-compatible ``/models`` endpoint."""
+    normalized, api_mode = normalize_api_url(base_url)
+    if not normalized:
+        raise LLMError("请先填写 API URL")
+    headers = {}
+    if str(api_key or "").strip():
+        headers["Authorization"] = f"Bearer {str(api_key).strip()}"
+    try:
+        async with httpx.AsyncClient(
+            base_url=_client_base_url(normalized),
+            headers=headers,
+            timeout=httpx.Timeout(connect=15, read=30, write=15, pool=15),
+        ) as client:
+            response = await client.get("models")
+    except httpx.HTTPError as error:
+        raise LLMError(f"模型列表请求失败: {error}") from error
+    if response.status_code >= 400:
+        body = response.text[:500]
+        raise LLMError(f"模型列表请求失败: HTTP {response.status_code}: {body}")
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise LLMError("模型列表响应不是有效 JSON") from error
+    rows = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise LLMError("模型列表响应缺少 data 数组")
+    models = []
+    for row in rows:
+        if isinstance(row, str) and row.strip():
+            models.append(row.strip())
+        elif isinstance(row, dict) and str(row.get("id") or "").strip():
+            models.append(str(row["id"]).strip())
+    models = sorted(set(models), key=str.casefold)
+    if not models:
+        raise LLMError("模型列表为空")
+    return {"models": models, "base_url": normalized, "api_mode": api_mode}
 
 
 class LLMClient:
     def __init__(self, cfg: LLMConfig):
         self.cfg = cfg
         if not cfg.is_mock:
+            headers = {}
+            if cfg.api_key.strip():
+                headers["Authorization"] = f"Bearer {cfg.api_key.strip()}"
             self._http = httpx.AsyncClient(
-                base_url=cfg.base_url,
-                headers={"Authorization": f"Bearer {cfg.api_key}"},
+                base_url=_client_base_url(cfg.base_url),
+                headers=headers,
                 timeout=httpx.Timeout(connect=15, read=300, write=30, pool=15),
             )
+
+    def _require_api_key(self):
+        if not self.cfg.api_key.strip():
+            raise LLMError("未配置 API Key，请在设置中填写 API Key，或切换到演示模式")
 
     async def close(self):
         if not self.cfg.is_mock:
@@ -58,20 +139,26 @@ class LLMClient:
             async for delta in _mock_narrator_stream(messages):
                 yield delta
             return
+        self._require_api_key()
         payload = {
             "model": self.cfg.model,
-            "messages": messages,
             "temperature": temperature if temperature is not None else self.cfg.temperature,
             "max_tokens": max_tokens,
             "stream": True,
         }
+        endpoint = "chat/completions"
+        if self.cfg.api_mode == "completion":
+            endpoint = "completions"
+            payload["prompt"] = _completion_prompt(messages)
+        else:
+            payload["messages"] = messages
         got_any = False
         last_err = None
         for attempt in range(3):
             if attempt:
                 await asyncio.sleep(2 * attempt)
             try:
-                async with self._http.stream("POST", "/chat/completions", json=payload) as resp:
+                async with self._http.stream("POST", endpoint, json=payload) as resp:
                     if resp.status_code >= 400:
                         body = (await resp.aread()).decode("utf-8", "replace")[:300]
                         raise LLMError(f"LLM HTTP {resp.status_code}: {body}")
@@ -85,13 +172,18 @@ class LLMClient:
                             obj = json.loads(chunk)
                         except json.JSONDecodeError:
                             continue
-                        delta = (obj.get("choices") or [{}])[0].get("delta", {}).get("content")
+                        choice = (obj.get("choices") or [{}])[0]
+                        delta = choice.get("text") or choice.get("delta", {}).get("content")
                         if delta:
                             got_any = True
                             yield delta
                     if got_any:
                         return
-            except (httpx.HTTPError, LLMError) as e:
+            except LLMError:
+                # 4xx configuration/auth/endpoint errors are deterministic;
+                # retrying only repeats the same failure and obscures its cause.
+                raise
+            except httpx.HTTPError as e:
                 last_err = e
                 if got_any:  # 已经吐过内容就不能安全重试
                     raise
@@ -101,23 +193,32 @@ class LLMClient:
         """非流式调用。aux=True 用辅助（便宜）模型。"""
         if self.cfg.is_mock:
             return _mock_aux_reply(messages)
+        self._require_api_key()
         payload = {
             "model": self.cfg.aux_model if aux else self.cfg.model,
-            "messages": messages,
             "temperature": temperature if temperature is not None else (
                 C.DEFAULT_AUX_TEMPERATURE if aux else self.cfg.temperature),
             "max_tokens": max_tokens,
         }
+        endpoint = "chat/completions"
+        if self.cfg.api_mode == "completion":
+            endpoint = "completions"
+            payload["prompt"] = _completion_prompt(messages)
+        else:
+            payload["messages"] = messages
         last_err = None
         for attempt in range(3):
             if attempt:
                 await asyncio.sleep(2 * attempt)
             try:
-                resp = await self._http.post("/chat/completions", json=payload)
+                resp = await self._http.post(endpoint, json=payload)
                 if resp.status_code >= 400:
                     raise LLMError(f"LLM HTTP {resp.status_code}: {resp.text[:300]}")
                 data = resp.json()
-                return data["choices"][0]["message"]["content"] or ""
+                choice = data["choices"][0]
+                return choice.get("text") or choice.get("message", {}).get("content") or ""
+            except LLMError:
+                raise
             except httpx.HTTPError as e:
                 last_err = e
         raise LLMError(f"调用失败: {last_err}")
@@ -125,10 +226,10 @@ class LLMClient:
 
 # ---------------- mock 演示模式（无 API Key 也能跑通全流程） ----------------
 
-_MOCK_TURN = """雨水敲打着铁皮屋顶，你{action_echo}之后，避难所里陷入短暂沉默。
-陈医生把那张染血的地图摊开在桌面上，指尖压住北方的一处标记："他们昨晚又往北移动了，至少二十人。"
-老周在角落里擦拭着猎枪，头也不抬："粮最多撑五天。"
-你注意到队长一直没说话，只是盯着地图边缘的一行小字。
+_MOCK_TURN = """<beat type="narration">雨水敲打着铁皮屋顶，你{action_echo}之后，避难所里陷入短暂沉默。</beat>
+<beat type="dialogue" speaker="陈医生">他们昨晚又往北移动了，至少二十人。</beat>
+<beat type="dialogue" speaker="老周">粮最多撑五天。</beat>
+<beat type="narration">你注意到队长一直没说话，只是盯着地图边缘的一行小字。</beat>
 [[META]]
 {"choices": ["追问地图边缘的小字", "质问队长为何沉默", "清点避难所的存粮", "提议连夜出发"], "minutes": 25, "place": "避难所·医务室", "present": ["陈医生", "老周", "队长"]}
 [[END]]"""

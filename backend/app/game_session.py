@@ -1,6 +1,6 @@
 """Game Orchestrator：唯一的回合循环。
 
-玩家行动 → 读世界状态 → 读记忆窗口 → 组装上下文 → 主 LLM（流式正文+结尾结构化块）
+玩家行动 → 读世界状态 → 读记忆窗口 → 组装上下文 → 主 LLM（流式 Beat+结尾结构化块）
 → 更新状态与事件库 → 异步副作用（NPC 心智 / 属性物品 / 世界推进 / 记忆结晶）→ 等待玩家。
 
 同步路径只有 1 次 LLM 调用（决策 #3/#5）；副作用全部走辅助便宜模型。
@@ -15,12 +15,13 @@ from .llm import LLMClient, LLMConfig
 from .memory_engine import MemoryEngine, _loads
 from . import npc_mind, world_reactor
 from .world_state import WorldState
+from .beat_parser import BeatStreamParser, beats_to_prose
 
 logger = logging.getLogger(__name__)
 
 _sessions: dict = {}
 
-_MODEL_KEYS = ("provider", "base_url", "api_key", "model", "aux_model", "temperature")
+_MODEL_KEYS = ("provider", "base_url", "api_key", "model", "aux_model", "temperature", "api_mode")
 
 
 def resolve_llm_config(db, world_cfg):
@@ -127,7 +128,8 @@ class GameSession:
         async for ev in self._run_narrator(msgs):
             yield ev
         meta = self._last_meta
-        turn = {"player_action": None, "narrative": self._last_prose, "meta": meta}
+        turn = {"player_action": None, "narrative": self._last_prose,
+                "beats": list(self._last_beats), "meta": meta}
         self._commit_turn(turn)
         self.config["_has_opening"] = True
         self.db.save_world_config(self.world_id, self.config)
@@ -159,7 +161,8 @@ class GameSession:
         async for ev in self._run_narrator(msgs):
             yield ev
         meta = self._last_meta
-        turn = {"player_action": action, "narrative": self._last_prose, "meta": meta}
+        turn = {"player_action": action, "narrative": self._last_prose,
+                "beats": list(self._last_beats), "meta": meta}
         self._commit_turn(turn)
         self.db.touch_world(self.world_id)
         self._schedule_side_effects(turn)
@@ -167,12 +170,20 @@ class GameSession:
 
     # ================= 叙事主调用 =================
     async def _run_narrator(self, messages):
-        """流式产出 {"type":"delta"} 与最终 {"type":"meta"}；结果同时暂存到 self._last_*。"""
+        """流式产出完整 Beat 与最终 meta；结果同时暂存到 self._last_*。"""
         self._last_prose = ""
+        self._last_beats = []
         self._last_meta = None
         buf = ""
         meta_mode = False
         meta_raw = ""
+        parser = BeatStreamParser()
+
+        def emit(beats):
+            for beat in beats:
+                self._last_beats.append(beat)
+                yield {"type": "beat", "beat": beat}
+
         async for delta in self.llm.stream_chat(messages):
             buf += delta
             if meta_mode:
@@ -181,9 +192,8 @@ class GameSession:
             idx = buf.find(C.META_SENTINEL)
             if idx >= 0:
                 prose = buf[:idx]
-                if prose:
-                    self._last_prose += prose
-                    yield {"type": "delta", "text": prose}
+                for event in emit(parser.feed(prose)):
+                    yield event
                 meta_mode = True
                 meta_raw = buf[idx + len(C.META_SENTINEL):]
                 buf = ""
@@ -191,21 +201,25 @@ class GameSession:
                 safe = len(buf) - (len(C.META_SENTINEL) - 1)
                 if safe > 0:
                     prose = buf[:safe]
-                    self._last_prose += prose
-                    yield {"type": "delta", "text": prose}
+                    for event in emit(parser.feed(prose)):
+                        yield event
                     buf = buf[safe:]
         if not meta_mode:
-            # 没有哨兵：残余全部当正文（模型没按格式输出的兜底）
-            if buf:
-                self._last_prose += buf
-                yield {"type": "delta", "text": buf}
+            # 没有哨兵：残余仍交给 parser，格式 miss 时降级为 narration beat。
+            for event in emit(parser.feed(buf)):
+                yield event
         else:
             meta = prompts.extract_meta(C.META_SENTINEL + meta_raw)
             self._last_meta = prompts.normalize_meta(
                 meta, self.state.place, list(self.state.present))
-        if not self._last_prose.strip():
-            self._last_prose = "（世界陷入了奇异的沉默……请重试一次。）"
-            yield {"type": "delta", "text": self._last_prose}
+        for event in emit(parser.finish()):
+            yield event
+        if not self._last_beats:
+            fallback = {"type": "narration", "speaker": None,
+                        "text": "（世界陷入了奇异的沉默……请重试一次。）"}
+            self._last_beats.append(fallback)
+            yield {"type": "beat", "beat": fallback}
+        self._last_prose = beats_to_prose(self._last_beats)
         if self._last_meta is None:
             self._last_meta = prompts.normalize_meta(None, self.state.place, list(self.state.present))
         yield {"type": "meta", "meta": self._last_meta}
@@ -460,6 +474,7 @@ class GameSession:
         turns = [{
             "player_action": t["player_action"],
             "narrative": t["narrative"],
+            "beats": list(t.get("beats") or []),
             "meta": t["meta"],
             "time_display": t["time_display"],
             "attr_changes": dict(t.get("attr_changes") or {}),

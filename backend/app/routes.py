@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from . import config as C
 from .db import Database
 from .game_session import get_session, close_session, drop_all_sessions
+from .llm import LLMError, fetch_models, normalize_api_url
 
 router = APIRouter(prefix="/api")
 db: Database = None  # main.py 启动时注入
@@ -49,6 +50,12 @@ class SettingsBody(BaseModel):
     api_key: str = ""
     model: str = ""
     aux_model: str = ""
+    api_mode: str = "auto"
+
+
+class ModelsRequest(BaseModel):
+    base_url: str = Field(min_length=1)
+    api_key: str = ""
 
 
 def _auto_title(body: WorldCreate) -> str:
@@ -175,7 +182,8 @@ async def delete_world(wid: str):
 # ---------------- 全局设置 ----------------
 def _default_settings():
     return {"provider": C.DEFAULT_PROVIDER, "base_url": C.DEFAULT_BASE_URL,
-            "api_key": "", "model": C.DEFAULT_MODEL, "aux_model": C.DEFAULT_AUX_MODEL}
+            "api_key": "", "model": C.DEFAULT_MODEL, "aux_model": C.DEFAULT_AUX_MODEL,
+            "api_mode": "chat"}
 
 
 @router.get("/settings")
@@ -188,10 +196,22 @@ def get_settings():
 def put_settings(body: SettingsBody):
     cur = db.get_settings() or {}
     new = {k: (getattr(body, k) or cur.get(k) or "") for k in
-           ("provider", "base_url", "api_key", "model", "aux_model")}
+           ("provider", "base_url", "api_key", "model", "aux_model", "api_mode")}
+    if new["base_url"]:
+        new["base_url"], inferred_mode = normalize_api_url(new["base_url"])
+        if body.api_mode not in {"chat", "completion"}:
+            new["api_mode"] = inferred_mode
     db.set_settings(new)
     drop_all_sessions()  # 让所有会话用新配置重建
     return {"ok": True}
+
+
+@router.post("/models")
+async def list_models(body: ModelsRequest):
+    try:
+        return await fetch_models(body.base_url, body.api_key)
+    except LLMError as error:
+        raise HTTPException(400, str(error)) from error
 
 
 # ---------------- 游戏 ----------------
