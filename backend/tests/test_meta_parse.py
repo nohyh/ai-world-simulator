@@ -87,3 +87,86 @@ def test_normalize_meta_keeps_two_to_four_choices():
         fallback_present=[],
     )
     assert m["choices"] == ["一", "二", "三", "四"]
+
+
+# ---------------- Narrator 状态补丁（单作者，阶段 4/5） ----------------
+
+def test_normalize_meta_patch_fields_normalized():
+    from app.prompts import normalize_meta
+    m = normalize_meta({
+        "choices": ["a", "b"], "minutes": 10, "place": "P", "present": ["林雨"],
+        "npc_updates": {"林雨": {"status": "受伤", "current_thought": "怀疑主角", "goal": "不该被存"},
+                        "陈浩": {"status": "在场"}},
+        "quality_updates": {"林雨": {"体质": -3, "可控": 99}},
+        "relationship_updates": [
+            {"from": "林雨", "to": "主角", "favor_delta": -6, "bond": "裂痕", "reason": "隐瞒"},
+            {"from": "", "to": "主角", "favor_delta": -1},       # 无效 from → 丢弃
+            {"from": "林雨", "to": "主角", "favor_delta": 999},   # clamp ±20
+        ],
+        "important_event": {"summary": "主角坦白", "participants": ["林雨"], "importance": "BOGUS"},
+        "player_update": {"status": "已死亡"},
+        "player_attr_changes": {"体质": -2, "智力": 99},
+        "key_item_changes": {"add": ["钥匙"], "remove": []},
+        "main_plot_update": "北迁",
+        "chapter_done": {"done": True, "reason": "离开学校"},
+    }, fallback_place="X", fallback_present=[])
+    assert m["npc_updates"]["林雨"]["current_thought"] == "怀疑主角"
+    assert "goal" not in m["npc_updates"]["林雨"]          # 非白名单字段被过滤
+    assert m["npc_updates"]["陈浩"]["status"] == "在场"
+    assert m["quality_updates"]["林雨"]["体质"] == -3
+    assert m["quality_updates"]["林雨"]["可控"] == 10      # clamp ±10
+    assert len(m["relationship_updates"]) == 2
+    assert m["relationship_updates"][1]["favor_delta"] == 20
+    assert m["important_event"]["importance"] == "minor"   # 非法值回退
+    assert m["player_update"]["status"] == "已死亡"
+    assert m["player_attr_changes"] == {"体质": -2, "智力": 3}
+    assert m["key_item_changes"]["add"] == ["钥匙"]
+    assert m["main_plot_update"] == "北迁"
+    assert m["chapter_done"] == {"done": True, "reason": "离开学校"}
+
+
+def test_normalize_meta_patch_safe_defaults_when_absent():
+    from app.prompts import normalize_meta
+    m = normalize_meta(None, fallback_place="X", fallback_present=[])
+    assert m["npc_updates"] == {}
+    assert m["new_npcs"] == []
+    assert m["quality_updates"] == {}
+    assert m["relationship_updates"] == []
+    assert m["important_event"] is None
+    assert m["player_update"] == {}
+    assert m["player_attr_changes"] == {}
+    assert m["key_item_changes"] == {"add": [], "remove": []}
+    assert m["main_plot_update"] is None
+    assert m["chapter_done"] is None
+
+
+def test_normalize_meta_patch_tolerates_bad_types():
+    from app.prompts import normalize_meta
+    m = normalize_meta({
+        "npc_updates": "不是对象",
+        "new_npcs": {"name": "x"},
+        "relationship_updates": {"from": "x"},
+        "important_event": "纯文本",
+        "player_update": [],
+        "key_item_changes": "坏了",
+    }, fallback_place="X", fallback_present=[])
+    assert m["npc_updates"] == {}
+    assert m["new_npcs"] == []
+    assert m["relationship_updates"] == []
+    assert m["important_event"] is None
+    assert m["player_update"] == {}
+    assert m["key_item_changes"] == {"add": [], "remove": []}
+
+
+def test_normalize_meta_new_npc_cards():
+    from app.prompts import normalize_meta
+    m = normalize_meta({
+        "new_npcs": [
+            {"name": "苏晴", "identity": "调查员", "desire": "找线索",
+             "qualities": {"观察": 80}, "current_thought": "这里不对劲"},
+            {"name": "", "identity": "无名字会被丢"},
+        ],
+    }, fallback_place="X", fallback_present=[])
+    assert len(m["new_npcs"]) == 1
+    assert m["new_npcs"][0]["name"] == "苏晴"
+    assert m["new_npcs"][0]["qualities"]["观察"] == 80

@@ -54,9 +54,9 @@ async def main():
         assert "desire" in card and "current_thought" in card and "status" in card and "qualities" in card
         assert "feeling" not in card and "goal" not in card and "secret_plan" not in card
 
-        # 有向关系表（创建时由提取调用生成）
+        # 有向关系表（创建时由提取调用生成；开篇补丁再 +2）
         assert ("陈医生", "主角") in s.state.relationships
-        assert s.state.relationships[("陈医生", "主角")]["favor"] == 70
+        assert s.state.relationships[("陈医生", "主角")]["favor"] == 72
         ctx = s.state.relationship_context(["陈医生"])
         assert "陈医生 → 主角" in ctx
 
@@ -69,6 +69,11 @@ async def main():
 
         st = s.state
         assert st.turn_count == 3, st.turn_count
+        # 单作者补丁：Narrator 的 META 补丁同步生效（不再有 npc_mind 二次裁决）
+        assert st.npcs["陈医生"]["current_thought"] == "也许该试着信任主角了。"
+        assert "队长" in st.npcs                       # new_npcs 建档
+        assert st.relationships[("陈医生", "主角")]["favor"] == 76  # 70 + 2×3 回合
+        assert len(st.important_events) >= 3
         snap = st.drawer_snapshot()
         assert snap["character"]["player"]["name"] == "阿远"
         npc = next(n for n in snap["character"]["npcs"] if n["name"] == "陈医生")

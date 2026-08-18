@@ -34,6 +34,7 @@ NARRATOR_SYSTEM = """你是一个沉浸式中文文字世界模拟引擎的叙�
 5. 篇幅自适应：快节奏的动作往来可以只有一两句话甚至十几个字；重要对话、场景转换、剧情推进可以写二三百字。总体宁精勿滥。
 6. 保持既有事实的连续性，不得与记忆、历史、状态冲突。专名（人名、地名、组织名）永远保持原样。present 中的已知 NPC 必须使用【已知 NPC 标准名称】里的原名，不得改成简称、称谓或同义变体；首次出现的新 NPC 可以在本回合首次命名，但从命名开始必须保持同一名字。
 7. 世界有内在压力：若【主线压力】提示存在，务必让它以合理方式渗入剧情，但不必每回合都直白展现。
+8. 你是唯一的状态记账员：生成 META 时，把本回合确实发生的状态变化一并写进去（稀疏：没有变化就不填字段）。更新原则——status/current_thought 可以有正常变化，但必须由当前剧情和既有事实自然支持；desire 是低频字段（目标真正改变才动）；personality/qualities 是极低频字段（只有重大成长、创伤、长期经历才动）；favor 普通互动 ±1~±5、明显事件 ±5~±10、极重大事件可以更大但必须克制；bond 一句话总结关系本质，可随剧情覆盖。数值只是给引擎记的账，永远不得在正文中暴露给读者。
 
 【输出格式】（严格遵守）
 先逐行输出剧情 Beat，不要任何前缀。每个 beat 必须完整占一行，beat 内禁止换行；一个 beat 只表达一个自然叙事节拍，通常 20~80 个汉字，不要为了凑长度拆句，也不要输出过长段落。
@@ -42,11 +43,29 @@ NARRATOR_SYSTEM = """你是一个沉浸式中文文字世界模拟引擎的叙�
 <beat type="narration" speaker="人物标准名称">某人物的独立动作、神态或其他玩家可感知表现</beat>
 <beat type="dialogue" speaker="人物标准名称">台词</beat>
 dialogue 必须填写 speaker。speaker 可以是玩家标准名称、【已知 NPC 标准名称】中的原名，或本回合首次命名的新 NPC；已知名称不得改写。narration 在没有明确主体时省略 speaker，有明确人物的可观察动作、神态或表现可以填写 speaker；不得借 narration 透露人物未说出口的想法、计划、秘密或心理。present 只填写本回合结束时在场的 NPC，不填写玩家；已知 NPC 使用原名，新 NPC 首次命名后保持同名。
-正文结束后，另起一行输出：
+正文结束后，另起一行输出完整 JSON（包含状态补丁）：
 [[META]]
-{{"choices": ["……", "……", "……"], "minutes": 30, "place": "当前地点", "present": ["在场NPC名"]}}
+{{
+ "choices": ["……", "……", "……"],
+ "minutes": 30,
+ "place": "当前地点",
+ "present": ["在场NPC名"],
+ "npc_updates": {{
+   "NPC标准名": {{"status": "新处境", "current_thought": "此刻最重要的想法"}}
+ }},
+ "quality_updates": {{"NPC标准名": {{"体质": -3}}}},
+ "relationship_updates": [
+   {{"from": "角色A", "to": "角色B", "favor_delta": -6, "bond": "关系本质的一句话", "reason": "变化原因"}}
+ ],
+ "important_event": {{"summary": "一句关键事实", "participants": ["相关人物"], "importance": "major或minor"}},
+ "player_update": {{"status": "主角的新状态（如：已死亡）"}},
+ "player_attr_changes": {{"属性名": -2}},
+ "key_item_changes": {{"add": ["获得的关键物品"], "remove": []}},
+ "main_plot_update": "主线表述有实质变化时才填，否则省略",
+ "chapter_done": {{"done": false, "reason": ""}}
+}}
 [[END]]
-其中 choices 为 2~4 个下一步行动选项，每个不超过 22 个字，行动导向、风格多样（可包含试探、对话、等待、时间流逝类如"休息到天亮"）；minutes 为本回合剧情流逝的分钟数（快对话 2~10，普通行动 15~60，长途移动或休息可为数百上千）；place 为本回合结束时的地点；present 为本回合在场的 NPC 名列表（无人则为空数组）。"""
+其中 choices 2~4 个、每个不超过 22 个字，行动导向、风格多样；minutes 为本回合剧情流逝的分钟数；place/present 同前。npc_updates / quality_updates / relationship_updates / important_event / player_update 等全是稀疏补丁：只有本回合确实发生、且值得被记住的状态或关系变化才输出对应字段，没有变化就省略；这就是同一作者顺手记账，不要为了填而填。本回合首次命名且确实会持续存在的角色，用"new_npcs"字段给出其人物卡（姓名/年龄/身份/status/qualities/personality/desire/background/current_thought）。"""
 
 
 def narrator_user_message(state_block, memory_block, relationship_block, thread_block, history_block, action):
@@ -203,48 +222,7 @@ def npc_cards_user_message(world_setting, important_people):
 {important_people or "（未提供，请自行创造）"}"""
 
 
-# ---------------------------------------------------------------- NPC 心智更新（异步）
-
-NPC_MIND_SYSTEM = """你是世界模拟器的后台状态更新器。MOCK:npcmind
-
-根据本回合剧情，更新在场 NPC 的当前状态，并判断玩家属性/物品是否发生值得记录的变化。
-每个 NPC 只能基于他自己可知晓的信息更新（他不在场的事他不知道）。【本回合剧情】和【他可知的信息】之外的内容一律不可当作记忆。
-
-严格输出 JSON（不要任何其他文字）：
-{
- "npcs": {
-   "NPC名": {"status": "新的处境（有变化才填）", "current_thought": "此刻最重要的一两句话（可更新）",
-             "desire": "愿望/目标（有实质变化才填）", "personality": "性格（只在重大成长时才填）"}
- },
- "new_npcs": [
-   {"name": "姓名", "age": 年龄, "identity": "身份", "status": "处境",
-    "qualities": {"智力": 65}, "personality": "性格", "desire": "愿望",
-    "background": "经历", "current_thought": "此刻想法"}
- ],
- "main_plot_update": "如主线发生了可确认的实质变化，给出更新后的主线；没有变化则留空字符串",
- "plot_advanced": true/false,
- "player_attr_changes": {"属性名": +1 或 -2},
- "key_item_changes": {"add": ["获得的关键物品"], "remove": ["失去的关键物品"]}
-}
-规则：当前主线会在用户消息中明确给出。plot_advanced 只表示当前 main_plot 本身发生了实质推进（获得关键主线信息、化解当前主线威胁、改变主线冲突等）；人物关系、恋爱进展或普通好感变化本身不算主线推进，除非它直接改变当前主线冲突。main_plot_update 只在主线表述需要更新时填写完整的新主线，否则留空；new_npcs 只填写本回合确实首次出现、且 narrator 的 present 已列出的未知人物，不要凭空扩充人物表；
-status/current_thought 可以有正常变化，但必须由当前剧情和已有事实自然支持；personality/desire/qualities 是低频字段，只在发生真正重大变化时更新；
-属性变化只在显著事件时给出（长期训练、重伤、领悟），每次至多 2 项、幅度 ≤3；
-key_item 只记录对剧情有意义的物品（关键道具、信物、武器），不要记普通消耗品；
-没有变化就输出空对象，不要硬凑。"""
-
-
-def npc_mind_user_message(action, narrative, main_plot, npc_sections):
-    return f"""【玩家行动】
-{action}
-
-【本回合剧情】
-{narrative}
-
-【当前主线】
-{main_plot or '（尚未形成）'}
-
-【待更新的 NPC 当前状态】
-{npc_sections}"""
+# (NPC 心智更新已并入 Narrator 的单作者 META 状态补丁——阶段 4 删除了 npc_mind)
 
 
 # ---------------------------------------------------------------- 记忆结晶（异步）
@@ -380,9 +358,7 @@ def normalize_meta(meta, fallback_place, fallback_present):
     except (TypeError, ValueError):
         minutes = 5
     place = str(meta.get("place") or "").strip() or fallback_place
-    # Missing `present` means the narrator omitted the field and may safely
-    # inherit the previous scene. An explicit [] means the protagonist is
-    # alone; never replace it with the previous NPC list.
+    # 缺失时继承上一场景，显式 [] 表示独处。
     if "present" in meta:
         raw_present = meta.get("present")
         if not isinstance(raw_present, list):
@@ -390,4 +366,145 @@ def normalize_meta(meta, fallback_place, fallback_present):
         present = [str(p).strip() for p in raw_present if str(p).strip()]
     else:
         present = list(fallback_present or [])
-    return {"choices": choices, "minutes": minutes, "place": place, "present": present}
+
+    # ---------------- Narrator 稀疏状态补丁（单作者记账） ----------------
+    npc_updates = {}
+    raw_npcs = meta.get("npc_updates")
+    if isinstance(raw_npcs, dict):
+        for name, fields in list(raw_npcs.items())[:5]:
+            name = str(name).strip()
+            if not name or not isinstance(fields, dict):
+                continue
+            upd = {}
+            for k in ("status", "personality", "desire", "current_thought"):
+                v = fields.get(k)
+                if isinstance(v, str) and v.strip():
+                    upd[k] = v.strip()[:120]
+            if upd:
+                npc_updates[name] = upd
+
+    new_npcs = []
+    raw_new = meta.get("new_npcs")
+    if isinstance(raw_new, list):
+        for card in raw_new[:3]:
+            if not isinstance(card, dict):
+                continue
+            name = str(card.get("name") or "").strip()
+            if not name or name in npc_updates:
+                continue
+            new_npcs.append({
+                "name": name,
+                "age": card.get("age") or "",
+                "identity": str(card.get("identity") or "未知来客").strip()[:80],
+                "status": str(card.get("status") or "").strip()[:120],
+                "qualities": {k: v for k, v in (card.get("qualities") or {}).items()
+                              if isinstance(v, (int, float))},
+                "personality": str(card.get("personality") or "").strip()[:120],
+                "desire": str(card.get("desire") or "").strip()[:120],
+                "background": str(card.get("background") or "").strip()[:200],
+                "current_thought": str(card.get("current_thought") or "").strip()[:120],
+            })
+
+    quality_updates = {}
+    raw_qual = meta.get("quality_updates")
+    if isinstance(raw_qual, dict):
+        for name, changes in list(raw_qual.items())[:3]:
+            name = str(name).strip()
+            if not name or not isinstance(changes, dict):
+                continue
+            out = {}
+            for q, d in list(changes.items())[:4]:
+                if not isinstance(q, str) or not q:
+                    continue
+                try:
+                    delta = max(-10, min(10, int(d)))
+                except (TypeError, ValueError):
+                    continue
+                out[q] = delta
+            if out:
+                quality_updates[name] = out
+
+    relationship_updates = []
+    raw_rels = meta.get("relationship_updates")
+    if isinstance(raw_rels, list):
+        for rel in raw_rels[:8]:
+            if not isinstance(rel, dict):
+                continue
+            frm = str(rel.get("from") or "").strip()
+            to = str(rel.get("to") or "").strip()
+            if not frm or not to:
+                continue
+            try:
+                delta = max(-20, min(20, int(rel.get("favor_delta") or 0)))
+            except (TypeError, ValueError):
+                delta = 0
+            relationship_updates.append({
+                "from": frm, "to": to, "favor_delta": delta,
+                "bond": str(rel.get("bond") or "").strip()[:120],
+                "reason": str(rel.get("reason") or "").strip()[:160],
+            })
+
+    important_event = None
+    raw_event = meta.get("important_event")
+    if isinstance(raw_event, dict):
+        summary = str(raw_event.get("summary") or "").strip()
+        if summary:
+            important_event = {
+                "summary": summary[:160],
+                "participants": [str(p).strip() for p in
+                                 (raw_event.get("participants") or []) if str(p).strip()][:8],
+                "importance": raw_event.get("importance")
+                              if raw_event.get("importance") in ("major", "minor") else "minor",
+            }
+
+    player_update = {}
+    raw_p = meta.get("player_update")
+    if isinstance(raw_p, dict):
+        status = str(raw_p.get("status") or "").strip()
+        if status:
+            player_update["status"] = status[:60]
+
+    attr_changes = {}
+    raw_attr = meta.get("player_attr_changes")
+    if isinstance(raw_attr, dict):
+        for k, d in list(raw_attr.items())[:3]:
+            k = str(k).strip()
+            if not k:
+                continue
+            try:
+                delta = max(-3, min(3, int(d)))
+            except (TypeError, ValueError):
+                continue
+            if delta:
+                attr_changes[k] = delta
+
+    item_changes = {"add": [], "remove": []}
+    raw_items = meta.get("key_item_changes")
+    if isinstance(raw_items, dict):
+        item_changes["add"] = [str(x)[:40] for x in (raw_items.get("add") or [])][:3]
+        item_changes["remove"] = [str(x)[:40] for x in (raw_items.get("remove") or [])][:3]
+
+    main_plot_update = str(meta.get("main_plot_update") or "").strip()[:240] or None
+
+    chapter_done = None
+    raw_done = meta.get("chapter_done")
+    if isinstance(raw_done, dict) and raw_done.get("done"):
+        chapter_done = {"done": True,
+                        "reason": str(raw_done.get("reason") or "").strip()[:200]}
+
+    return {
+        "choices": choices,
+        "minutes": minutes,
+        "place": place,
+        "present": present,
+        "npc_updates": npc_updates,
+        "new_npcs": new_npcs,
+        "quality_updates": quality_updates,
+        "relationship_updates": relationship_updates,
+        "important_event": important_event,
+        "player_update": player_update,
+        "player_attr_changes": attr_changes,
+        "key_item_changes": item_changes,
+        "main_plot_update": main_plot_update,
+        "chapter_done": chapter_done,
+    }

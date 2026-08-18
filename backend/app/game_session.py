@@ -13,7 +13,7 @@ from . import config as C
 from . import prompts
 from .llm import LLMClient, LLMConfig
 from .memory_engine import MemoryEngine, _loads
-from . import npc_mind, world_reactor
+from . import world_reactor
 from .world_state import WorldState
 from .beat_parser import BeatStreamParser, beats_to_prose
 
@@ -96,6 +96,7 @@ class GameSession:
         self._turn_lock = asyncio.Lock()
         self._loop = None
         self._closed = False
+        self.death = False
 
     # ================= 对外：开篇 =================
     async def ensure_opening(self):
@@ -276,46 +277,10 @@ class GameSession:
                 logger.warning("Cancelled %d side-effect task(s) after %ss timeout", len(pending), timeout)
 
     async def _side_effects(self, turn):
-        action = turn["player_action"] or "（冒险开始）"
-        narrative = turn["narrative"]
-        present = turn["meta"].get("present") or []
+        # Narrator 已在 _commit_turn 中同步应用了人物/关系/事件补丁
+        # （单作者，阶段 4/5）。异步副作用只保留世界推进与记忆结晶（阶段 10）。
 
-        # 1) NPC 心智 + 属性/物品变化。每个副作用独立失败，避免一个辅助
-        # 模型超时把世界时钟和记忆结晶一起吞掉。
-        try:
-            knowledge = {name: self.state.npc_knowledge_window(name)
-                         for name in present if name in self.state.npcs}
-            unknown_present = [name for name in present if name not in self.state.npcs]
-            npc_context = ""
-            if unknown_present:
-                npc_context = ("\n\n【本回合首次出现、待建立人物卡的名字】\n" +
-                               "、".join(unknown_present))
-            npc_sections = ("\n\n".join(
-                npc_mind.npc_section(
-                    name, self.state.npcs[name], knowledge.get(name, ""))
-                for name in present if name in self.state.npcs
-            ) or "（当前无已知 NPC 在场；只判断玩家属性、物品和主线是否变化）") + npc_context
-            updates, new_npcs, plot_advanced, plot_update, attr_changes, item_changes = (
-                await npc_mind.update_minds(
-                    self.llm, self.state.npcs, present, action, narrative,
-                    self.state.player["attrs"], self.state.main_plot, knowledge,
-                    npc_sections=npc_sections))
-            if new_npcs:
-                self._append("NPC_ADD", {"npcs": new_npcs})
-            if updates:
-                self._append("NPC_STATE", {"npcs": updates})
-            if attr_changes:
-                self._append("ATTR_CHANGE", {"changes": attr_changes})
-            if item_changes.get("add") or item_changes.get("remove"):
-                self._append("ITEM_CHANGE", item_changes)
-            if plot_update:
-                self._append("MAIN_PLOT_UPDATE", {"main_plot": plot_update})
-            if plot_advanced:
-                self._append("PLOT_PROGRESS", {})
-        except Exception:
-            logger.exception("NPC side effect failed")
-
-        # 2) 世界推进：使用累计的、尚未被 WORLD_TICK 消费的叙事分钟数。
+        # 1) 世界推进：使用累计的、尚未被 WORLD_TICK 消费的叙事分钟数。
         try:
             pending_minutes = self.state.world_tick_pending_minutes
             if pending_minutes >= C.WORLD_TICK_MIN_MINUTES:
@@ -338,7 +303,7 @@ class GameSession:
         except Exception:
             logger.exception("World tick side effect failed")
 
-        # 3) 记忆结晶
+        # 2) 记忆结晶
         try:
             pending_turns = self.state.pending_crystal_turns
             pending_ticks = self.state.pending_crystal_world_ticks
@@ -472,6 +437,41 @@ class GameSession:
         meta = turn.get("meta") or {}
         turn["witnessed_by"] = list(meta.get("present") or [])
         self._append("TURN", turn)
+        # Narrator 单作者状态补丁：TURN 是原因，patch 事件是该回合的结果。
+        self._apply_meta_patch(meta)
+
+    def _apply_meta_patch(self, meta):
+        """按因果顺序落库 Narrator 的稀疏状态补丁（阶段 5）。
+
+        顺序：TURN → NPC_ADD/NPC_STATE → QUALITY_UPDATE → REL_UPDATE
+              → IMPORTANT_EVENT → PLAYER_UPDATE → ATTR/ITEM → MAIN_PLOT。
+        """
+        if not isinstance(meta, dict):
+            return
+        if meta.get("new_npcs"):
+            self._append("NPC_ADD", {"npcs": {n["name"]: n for n in meta["new_npcs"]}})
+        if meta.get("npc_updates"):
+            self._append("NPC_STATE", {"npcs": meta["npc_updates"]})
+        for name, changes in (meta.get("quality_updates") or {}).items():
+            self._append("QUALITY_UPDATE", {"entity": name, "changes": changes})
+        for rel in meta.get("relationship_updates") or []:
+            self._append("REL_UPDATE", rel)
+        if meta.get("important_event"):
+            self._append("IMPORTANT_EVENT", meta["important_event"])
+        if meta.get("player_update"):
+            self._append("PLAYER_UPDATE", meta["player_update"])
+            if meta["player_update"].get("status") == "已死亡":
+                self.death = True
+        if meta.get("player_attr_changes"):
+            self._append("ATTR_CHANGE", {"changes": meta["player_attr_changes"]})
+        if meta.get("key_item_changes"):
+            self._append("ITEM_CHANGE", meta["key_item_changes"])
+        plot_update = meta.get("main_plot_update")
+        if plot_update and plot_update != self.state.main_plot:
+            self._append("MAIN_PLOT_UPDATE", {"main_plot": plot_update})
+            # 主线有实质推进 → 重置主线压力计数。
+            if plot_update:
+                self._append("PLOT_PROGRESS", {})
 
     def _append(self, etype, data):
         if self._closed:

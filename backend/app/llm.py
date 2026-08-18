@@ -231,7 +231,23 @@ _MOCK_TURN = """<beat type="narration">雨水敲打着铁皮屋顶，你{action_
 <beat type="dialogue" speaker="老周">粮最多撑五天。</beat>
 <beat type="narration">你注意到队长一直没说话，只是盯着地图边缘的一行小字。</beat>
 [[META]]
-{"choices": ["追问地图边缘的小字", "质问队长为何沉默", "清点避难所的存粮", "提议连夜出发"], "minutes": 25, "place": "避难所·医务室", "present": ["陈医生", "老周", "队长"]}
+{"choices": ["追问地图边缘的小字", "质问队长为何沉默", "清点避难所的存粮", "提议连夜出发"],
+ "minutes": 25, "place": "避难所·医务室", "present": ["陈医生", "老周", "队长"],
+ "new_npcs": [{"name": "队长", "age": 40, "identity": "避难所负责人", "status": "盯着地图角落",
+               "qualities": {"决断": 75, "声望": 70}, "personality": "沉默寡言",
+               "desire": "守住避难所的最后一条生路", "background": "前军官出身",
+               "current_thought": "主角也许知道一条别人没走过的小路。"}],
+ "npc_updates": {"陈医生": {"status": "仍在医务室忙碌",
+                            "current_thought": "也许该试着信任主角了。"}},
+ "quality_updates": {},
+ "relationship_updates": [{"from": "陈医生", "to": "主角", "favor_delta": 2,
+                           "bond": "从戒备转向开始信任你", "reason": "主角在危机中冷静果断"}],
+ "important_event": {"summary": "主角与同伴确认了北方威胁的紧迫性",
+                     "participants": ["陈医生", "老周", "队长"], "importance": "minor"},
+ "player_update": {},
+ "player_attr_changes": {},
+ "key_item_changes": {"add": [], "remove": []},
+ "chapter_done": {"done": false, "reason": ""}}
 [[END]]"""
 
 
