@@ -170,3 +170,69 @@ def test_main_plot_update_is_event_sourced():
         ("MAIN_PLOT_UPDATE", {"main_plot": "铁鸦集团已经封锁北岭"}),
     ], CONFIG)
     assert st.main_plot == "铁鸦集团已经封锁北岭"
+
+
+# ---------------- 有向稀疏关系表 ----------------
+
+def test_relationship_created_on_first_update_with_default_50():
+    st = WorldState.rebuild([
+        ("REL_UPDATE", {"from": "林雨", "to": "主角", "favor_delta": -6,
+                        "bond": "合作仍在继续，但已有裂痕", "reason": "主角隐瞒了感染者"}),
+    ], CONFIG)
+    rel = st.relationships[("林雨", "主角")]
+    assert rel["favor"] == 44   # 默认 50 + (-6)
+    assert rel["bond"] == "合作仍在继续，但已有裂痕"
+
+
+def test_relationship_is_directed_reverse_edge_distinct():
+    st = WorldState.rebuild([
+        ("REL_UPDATE", {"from": "主角", "to": "林雨", "bond": "觉得她可信"}),
+        ("REL_UPDATE", {"from": "林雨", "to": "主角", "favor_delta": 10}),
+    ], CONFIG)
+    assert st.relationships[("主角", "林雨")]["favor"] == 50
+    assert st.relationships[("林雨", "主角")]["favor"] == 60
+    assert len(st.relationships) == 2
+
+
+def test_relationship_favor_clamped_and_bond_overwrites():
+    st = WorldState.rebuild([
+        ("REL_UPDATE", {"from": "甲", "to": "乙", "favor_delta": 999}),
+        ("REL_UPDATE", {"from": "甲", "to": "乙", "favor_delta": -999}),
+        ("REL_UPDATE", {"from": "甲", "to": "乙", "bond": "第一句"}),
+        ("REL_UPDATE", {"from": "甲", "to": "乙", "bond": "第二句覆盖"}),
+    ], CONFIG)
+    rel = st.relationships[("甲", "乙")]
+    assert rel["favor"] == 0    # +999→100，-999→0
+    assert rel["bond"] == "第二句覆盖"
+
+
+def test_relationship_seeded_from_initial_config():
+    cfg = {**CONFIG, "initial_relationships": [
+        {"from": "陈医生", "to": "主角", "favor": 70, "bond": "欠你一个人情"},
+        {"from": "林雨", "to": "主角", "favor": 120},
+    ]}
+    st = WorldState(cfg)
+    assert st.relationships[("陈医生", "主角")] == {"favor": 70, "bond": "欠你一个人情"}
+    assert st.relationships[("林雨", "主角")]["favor"] == 100  # clamp
+
+
+def test_relationship_context_injects_only_relevant_edges():
+    cfg = {**CONFIG, "initial_relationships": [
+        {"from": "陈医生", "to": "主角", "favor": 70, "bond": "信任"},
+        {"from": "老周", "to": "主角", "favor": 55, "bond": "旧识"},
+        {"from": "陈医生", "to": "老周", "favor": 60, "bond": "搭档"},
+    ]}
+    st = WorldState(cfg)
+    ctx = st.relationship_context(["陈医生"])
+    assert "陈医生 → 主角" in ctx
+    assert "陈医生 → 老周" in ctx
+    assert "老周 → 主角" not in ctx
+    assert "好感 70" in ctx
+
+
+def test_relationship_context_respects_budget():
+    st = WorldState.rebuild([
+        ("REL_UPDATE", {"from": "长名甲乙", "to": "主角", "favor_delta": 0, "bond": "一句话" * 200}),
+    ], CONFIG)
+    ctx = st.relationship_context(["长名甲乙"], budget=60)
+    assert len(ctx) <= 60

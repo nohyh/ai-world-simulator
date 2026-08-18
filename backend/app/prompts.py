@@ -49,17 +49,25 @@ dialogue 必须填写 speaker。speaker 可以是玩家标准名称、【已知 
 其中 choices 为 2~4 个下一步行动选项，每个不超过 22 个字，行动导向、风格多样（可包含试探、对话、等待、时间流逝类如"休息到天亮"）；minutes 为本回合剧情流逝的分钟数（快对话 2~10，普通行动 15~60，长途移动或休息可为数百上千）；place 为本回合结束时的地点；present 为本回合在场的 NPC 名列表（无人则为空数组）。"""
 
 
-def narrator_user_message(state_block, memory_block, thread_block, history_block, action):
+def narrator_user_message(state_block, memory_block, relationship_block, thread_block, history_block, action):
     return f"""【当前世界状态】
 {state_block}
 
 {memory_block}
+{relationship_block}
 {thread_block}
 {history_block}
 【玩家行动】
 {action}
 
 请推进剧情。"""
+
+
+def relationship_block(context):
+    if not context:
+        return ""
+    return ("【人物关系】（有向：左→右；好感 0~100 仅供叙事者判断亲疏，"
+            "羁绊是关系本质的文字描述）\n" + context)
 
 
 def state_block(player, npcs, time_display, place, present, knowledge_by_npc=None):
@@ -179,9 +187,12 @@ NPC_CARDS_SYSTEM = """你是游戏世界构筑器。MOCK:npccards
     "background": "进入当前故事以前的重要经历",
     "current_thought": "此刻心里最重要的一两句话"}
  ],
+ "relationships": [
+   {"from": "角色A", "to": "角色B", "favor": 0~100 的整数, "bond": "一句关系本质总结"}
+ ],
  "main_plot": "一条 30~60 字的主线：世界正在发生什么、什么在逼近或崩塌"
 }
-要求：姓名使用原文专名；qualities 不规定固定模板，按角色设定生成 3~5 项合理的 0~100 量级数值；desire 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；status 与 current_thought 都要反映开局处境。"""
+要求：姓名使用原文专名；qualities 不规定固定模板，按角色设定生成 3~5 项合理的 0~100 量级数值；desire 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；status 与 current_thought 都要反映开局处境；relationships 只列出开局真正存在或重要的有向关系（通常是与主角之间，或关键 NPC 之间），不建全连矩阵；favor 是 0~100 的亲疏，bond 比数值更重要，用一句话说明关系的本质。"""
 
 
 def npc_cards_user_message(world_setting, important_people):

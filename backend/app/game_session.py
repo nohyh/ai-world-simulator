@@ -385,6 +385,7 @@ class GameSession:
                      for name in st.present if name in st.npcs}
         state_text = prompts.state_block(
             st.player, st.npcs, st.display_time(), st.place, st.present, knowledge)
+        rel_text = prompts.relationship_block(st.relationship_context(st.present))
         thread_text = prompts.thread_block(st.main_plot, pressure, st.world_threads)
         fixed_chars = len(state_text) + len(thread_text) + len(action) + 180
         available = max(0, C.CONTEXT_BUDGET_CHARS - fixed_chars)
@@ -398,6 +399,7 @@ class GameSession:
         return prompts.narrator_user_message(
             state_text,
             mem_block,
+            rel_text,
             thread_text,
             prompts.history_block(st.recent_turns(), budget=history_budget),
             action,
@@ -423,6 +425,17 @@ class GameSession:
                 self.config["npc_cards"] = [c for c in cards if isinstance(c, dict) and c.get("name")]
             if isinstance(obj.get("main_plot"), str) and obj["main_plot"].strip():
                 self.config["main_plot"] = obj["main_plot"].strip()[:200]
+            rels = obj.get("relationships") or []
+            cleaned = []
+            for rel in rels if isinstance(rels, list) else []:
+                if isinstance(rel, dict) and str(rel.get("from") or "").strip() and str(rel.get("to") or "").strip():
+                    cleaned.append({
+                        "from": str(rel["from"]).strip(),
+                        "to": str(rel["to"]).strip(),
+                        "favor": rel.get("favor"),
+                        "bond": str(rel.get("bond") or "").strip()[:120],
+                    })
+            self.config["initial_relationships"] = cleaned
             self.db.save_world_config(self.world_id, self.config)
             self.state = WorldState.rebuild(self.db.get_events(self.world_id), self.config)
             self.mem = MemoryEngine(self.state.crystals)

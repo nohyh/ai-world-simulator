@@ -64,6 +64,21 @@ class WorldState:
             if not name:
                 continue
             self.npcs[name] = _npc_state(card)
+        # 有向稀疏关系表：(from, to) -> {"favor": 0..100, "bond": str}
+        self.relationships = {}
+        for rel in config.get("initial_relationships") or []:
+            frm = str(rel.get("from") or "").strip()
+            to = str(rel.get("to") or "").strip()
+            if not frm or not to:
+                continue
+            try:
+                favor = max(0, min(100, int(rel.get("favor") or 50)))
+            except (TypeError, ValueError):
+                favor = 50
+            self.relationships[(frm, to)] = {
+                "favor": favor,
+                "bond": str(rel.get("bond") or "").strip(),
+            }
         # Only characters the protagonist has encountered belong in the public
         # character view. `present` is emitted by each narrator turn and is the
         # existing witness signal used by the game state.
@@ -136,6 +151,25 @@ class WorldState:
                 self.npcs[name] = _npc_state(card)
                 if name in self.present:
                     self.seen_npcs.add(name)
+        elif etype == "REL_UPDATE":
+            frm = str(data.get("from") or "").strip()
+            to = str(data.get("to") or "").strip()
+            if not frm or not to:
+                return
+            key = (frm, to)
+            cur = self.relationships.get(key)
+            if cur is None:
+                # 首次建立关系：默认 favor=50 再叠加 delta。
+                cur = {"favor": 50, "bond": ""}
+                self.relationships[key] = cur
+            try:
+                delta = int(data.get("favor_delta") or 0)
+            except (TypeError, ValueError):
+                delta = 0
+            cur["favor"] = max(0, min(100, cur["favor"] + delta))
+            bond = str(data.get("bond") or "").strip()
+            if bond:
+                cur["bond"] = bond
         elif etype == "ATTR_CHANGE":
             for k, d in (data.get("changes") or {}).items():
                 if k in self.player["attrs"]:
@@ -250,6 +284,33 @@ class WorldState:
         if not lines:
             return "（没有目击到更早的相关事件）"
         return "\n\n".join(reversed(lines))
+
+    def relationship_context(self, names, budget=C.RELATIONSHIP_BUDGET_CHARS):
+        """当前剧情相关的有向关系：任一端点在 names（或在场 NPC）或玩家，按预算注入。
+
+        关系数据只供叙事者参考，绝不进玩家抽屉。
+        """
+        if not self.relationships:
+            return ""
+        wanted = set(names or [])
+        player = self.player.get("name")
+        if player:
+            wanted.add(player)
+        lines = []
+        used = 0
+        for (frm, to), rel in sorted(self.relationships.items()):
+            if frm not in wanted and to not in wanted:
+                continue
+            line = f"{frm} → {to}：好感 {rel['favor']}"
+            if rel.get("bond"):
+                line += f"；羁绊：{rel['bond']}"
+            if used + len(line) + 1 > budget:
+                if not lines:
+                    lines.append(line[:budget])
+                break
+            lines.append(line)
+            used += len(line) + 1
+        return "\n".join(lines)
 
     # ---------------- 抽屉（玩家视角） ----------------
     def drawer_snapshot(self):

@@ -25,6 +25,7 @@ MAX_NPC_UPDATE = 5            # 单回合最多更新的在场 NPC 数
 # ---- 记忆检索预算（字符数，近似 token 的两倍中文占比） ----
 MEMORY_BUDGET_CHARS = 2400
 NPC_KNOWLEDGE_BUDGET_CHARS = 1800
+RELATIONSHIP_BUDGET_CHARS = 1200  # 【人物关系】块的最大字符预算
 CONTEXT_BUDGET_CHARS = 12000  # 单次叙事 user context 的硬字符预算
 PER_LAYER_TOP_K = 3
 

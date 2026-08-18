@@ -54,6 +54,12 @@ async def main():
         assert "desire" in card and "current_thought" in card and "status" in card and "qualities" in card
         assert "feeling" not in card and "goal" not in card and "secret_plan" not in card
 
+        # 有向关系表（创建时由提取调用生成）
+        assert ("陈医生", "主角") in s.state.relationships
+        assert s.state.relationships[("陈医生", "主角")]["favor"] == 70
+        ctx = s.state.relationship_context(["陈医生"])
+        assert "陈医生 → 主角" in ctx
+
         for action in ("询问地图的来源", "提议立即出发"):
             seen = []
             async for ev in s.process_action(action):
@@ -75,7 +81,7 @@ async def main():
         assert s3.state.turn_count == 3
         assert set(s3.state.npcs) == set(st.npcs)
         assert s3.state.npcs["陈医生"]["current_thought"] == st.npcs["陈医生"]["current_thought"]
-        print("V2-STAGE1-OK turns=%d npcs=%s" % (st.turn_count, list(st.npcs)))
+        print("V2-SMOKE-OK turns=%d npcs=%s rels=%d" % (st.turn_count, list(st.npcs), len(st.relationships)))
         print("  card_sample:", {k: st.npcs["陈医生"][k] for k in ("status", "desire", "current_thought")})
     finally:
         drop_session(wid)

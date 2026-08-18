@@ -271,6 +271,14 @@ def _mock_aux_reply(messages):
                  "background": "在山里打了三十年的猎",
                  "current_thought": "粮最多撑五天，得尽快找条出路。"},
             ],
+            "relationships": [
+                {"from": "陈医生", "to": "主角", "favor": 70,
+                 "bond": "曾并肩守过一夜，已经开始信任你"},
+                {"from": "老周", "to": "主角", "favor": 55,
+                 "bond": "旧识，嘴上不服但愿意共事"},
+                {"from": "陈医生", "to": "老周", "favor": 60,
+                 "bond": "多年搭档，互相掩护"},
+            ],
             "main_plot": "北方的武装集团正在逼近避难所，水源与粮食只够支撑五天。",
         }, ensure_ascii=False)
     if "MOCK:npcmind" in joined:
