@@ -14,7 +14,7 @@ from . import prompts
 from .llm import LLMClient, LLMConfig
 from .memory_engine import MemoryEngine, _loads
 from . import world_reactor
-from .world_state import WorldState
+from .world_state import WorldState, canon_name
 from .beat_parser import BeatStreamParser, beats_to_prose
 
 logger = logging.getLogger(__name__)
@@ -107,8 +107,12 @@ class GameSession:
                 yield ev
 
     async def _ensure_opening_unlocked(self):
-        """SSE 生成器：若已有回合则直接结束，否则生成开篇。"""
-        if self.state.turns:
+        """SSE 生成器：当前章节已有回合则直接结束，否则统一生成本章开篇。
+
+        世界首次开始 = 第一章开篇；切章后 = 第二章开篇；本章重开后 = 重新生成本章开篇。
+        全部走同一个 Story Context Builder（与普通回合一致）。
+        """
+        if self.state.turns and self.state.turns[-1].get("chapter") == self.state.current_chapter:
             yield {"type": "done", "history": self._history_payload()}
             return
         if not self.config.get("npc_cards"):
@@ -117,15 +121,7 @@ class GameSession:
 
         msgs = [
             {"role": "system", "content": self._narrator_system()},
-            {"role": "user", "content": prompts.opening_user_message(
-                self.config.get("world_setting") or "",
-                self.config.get("world_rules") or "",
-                self.config.get("tone") or "",
-                self.state.player,
-                self._npc_cards_desc(),
-                self.state.display_time(),
-                situation=self.config.get("current_situation") or "",
-                notes=self.config.get("custom_notes") or "")},
+            {"role": "user", "content": self._narrator_user(None, opening=True)},
         ]
         async for ev in self._run_narrator(msgs):
             yield ev
@@ -223,7 +219,8 @@ class GameSession:
         self._last_prose = beats_to_prose(self._last_beats)
         if self._last_meta is None:
             self._last_meta = prompts.normalize_meta(None, self.state.place, list(self.state.present))
-        yield {"type": "meta", "meta": self._last_meta}
+        # 只把公共 META 外发：隐藏补丁绝不进 SSE。
+        yield {"type": "meta", "meta": prompts.public_meta(self._last_meta)}
 
     # ================= 异步副作用 =================
     def _schedule_side_effects(self, turn):
@@ -337,30 +334,51 @@ class GameSession:
             tone=self.config.get("tone") or "（默认：沉浸、克制、有张力）",
         )
 
-    def _narrator_user(self, action):
+    def _narrator_user(self, action, opening=False):
         st = self.state
-        # 记忆检索：查询 = 玩家行动 + 最近两回合的叙事
-        query = action + " " + " ".join(
-            t["narrative"][:200] for t in st.recent_turns(2))
+        if opening:
+            # 章首开篇：注入全部已知人物（小规模，避免第一幕人物信息缺失）。
+            relevant = list(st.npcs)
+            query = " ".join(t["narrative"][:200] for t in st.recent_turns(2))
+        else:
+            # 相关人物 = 上一回合在场 ∪ 玩家行动中直接提到的人名。
+            rel = set(st.present)
+            text = action or ""
+            for n in st.npcs:
+                if n and n in text:
+                    rel.add(n)
+            relevant = [n for n in st.npcs if n in rel]
+            query = action + " " + " ".join(
+                t["narrative"][:200] for t in st.recent_turns(2))
+        # 有 active chapter 时不再做「N 回合无主线推进强制介入」——章节已承担防止跑偏。
+        has_chapter = bool(st.chapters and st.chapters[-1].get("frame"))
         pressure = st.plot_pressure
-        if st.turns_since_plot >= C.PLOT_PRESSURE_TURNS and st.main_plot:
+        if (not has_chapter and st.main_plot
+                and st.turns_since_plot >= C.PLOT_PRESSURE_TURNS):
             pressure = (pressure + " " if pressure else "") + \
                        f"主线已经 {st.turns_since_plot} 回合无实质推进，必须开始主动介入。"
 
         knowledge = {name: st.npc_knowledge_window(name)
-                     for name in st.present if name in st.npcs}
+                     for name in relevant if name in st.npcs}
         state_text = prompts.state_block(
-            st.player, st.npcs, st.display_time(), st.place, st.present, knowledge)
+            st.player, st.npcs, st.display_time(), st.place, relevant, knowledge)
         frame = st.chapters[-1]["frame"] if st.chapters else (self.config.get("first_chapter") or {})
         chapter_text = prompts.chapter_block(frame)
-        rel_text = prompts.relationship_block(st.relationship_context(st.present))
+        rel_text = prompts.relationship_block(st.relationship_context(relevant))
         ev_text = prompts.events_block(st.important_events)
         thread_text = prompts.thread_block(st.main_plot, pressure, st.world_threads)
+
+        directive = opening and (
+            "（这是当前章节的开篇）请根据以上世界状态、本章范围与人物关系，"
+            "生成这一章的开篇场景：把玩家放进本章范围内的一个具体场景，"
+            "至少一名相关人物在场，结尾留下明确的戏剧张力，"
+            "然后按输出格式给出 META 与状态补丁。") or action
+
         fixed_chars = (len(state_text) + len(chapter_text) + len(rel_text) + len(ev_text)
-                       + len(thread_text) + len(action) + 220)
+                       + len(thread_text) + len(directive or "") + 220)
         available = max(0, C.CONTEXT_BUDGET_CHARS - fixed_chars)
         memory_budget = min(C.MEMORY_BUDGET_CHARS, available)
-        mem_segments = self.mem.build_context(query, st.present, budget=memory_budget)
+        mem_segments = self.mem.build_context(query, relevant, budget=memory_budget)
         mem_block = prompts.memory_block(mem_segments)
         # Return unused memory capacity to recent history instead of reserving
         # a fixed 40/60 split.
@@ -374,7 +392,7 @@ class GameSession:
             ev_text,
             thread_text,
             prompts.history_block(st.recent_turns(), budget=history_budget),
-            action,
+            directive,
         )
 
     def _npc_cards_desc(self):
@@ -386,27 +404,47 @@ class GameSession:
     # ================= 持久化与杂项 =================
     async def _parse_npc_cards(self):
         try:
+            player = self.config.get("player") or {}
+            player_name = str(player.get("name") or "").strip()
             raw = await self.llm.chat(
                 [{"role": "system", "content": prompts.NPC_CARDS_SYSTEM},
                  {"role": "user", "content": prompts.npc_cards_user_message(
-                     self.config.get("world_setting") or "", self.config.get("important_people") or "")}],
-                aux=True, max_tokens=1200)
+                     self.config.get("world_setting") or "",
+                     self.config.get("world_rules") or "",
+                     self.config.get("current_situation") or "",
+                     self.config.get("start_time") or "",
+                     self.config.get("start_place") or "",
+                     player,
+                     self.config.get("important_people") or "")}],
+                aux=False,          # 一局一次的核心创作（人物底座/关系/首章），用主模型
+                max_tokens=1600)
             obj = _loads(raw) or {}
             cards = obj.get("npcs") or []
             if isinstance(cards, list) and cards:
                 self.config["npc_cards"] = [c for c in cards if isinstance(c, dict) and c.get("name")]
             if isinstance(obj.get("main_plot"), str) and obj["main_plot"].strip():
                 self.config["main_plot"] = obj["main_plot"].strip()[:200]
+            card_names = {str(c.get("name") or "").strip() for c in cards if isinstance(c, dict)}
             rels = obj.get("relationships") or []
             cleaned = []
             for rel in rels if isinstance(rels, list) else []:
-                if isinstance(rel, dict) and str(rel.get("from") or "").strip() and str(rel.get("to") or "").strip():
-                    cleaned.append({
-                        "from": str(rel["from"]).strip(),
-                        "to": str(rel["to"]).strip(),
-                        "favor": rel.get("favor"),
-                        "bond": str(rel.get("bond") or "").strip()[:120],
-                    })
+                if not isinstance(rel, dict):
+                    continue
+                frm = canon_name(rel.get("from"), player_name)
+                to = canon_name(rel.get("to"), player_name)
+                if not frm or not to:
+                    continue
+                # 端点必须在玩家标准名或本批 NPC 内，否则丢弃（保持数据库干净）。
+                if frm not in card_names and frm != player_name:
+                    continue
+                if to not in card_names and to != player_name:
+                    continue
+                cleaned.append({
+                    "from": frm,
+                    "to": to,
+                    "favor": rel.get("favor"),
+                    "bond": str(rel.get("bond") or "").strip()[:120],
+                })
             self.config["initial_relationships"] = cleaned
             fc = obj.get("first_chapter")
             first_chapter = None
@@ -452,11 +490,13 @@ class GameSession:
         return snapshots
 
     def _commit_turn(self, turn):
-        meta = turn.get("meta") or {}
-        turn["witnessed_by"] = list(meta.get("present") or [])
+        full_meta = turn.get("meta") or {}
+        turn["witnessed_by"] = list(full_meta.get("present") or [])
+        # TURN 只保存玩家公共 META；隐藏补丁由单独事件承载，避免在 TURN 里再复制一份。
+        turn["meta"] = prompts.public_meta(full_meta)
         self._append("TURN", turn)
         # Narrator 单作者状态补丁：TURN 是原因，patch 事件是该回合的结果。
-        self._apply_meta_patch(meta)
+        self._apply_meta_patch(full_meta)
 
     def _apply_meta_patch(self, meta):
         """按因果顺序落库 Narrator 的稀疏状态补丁（阶段 5）。
@@ -472,8 +512,18 @@ class GameSession:
             self._append("NPC_STATE", {"npcs": meta["npc_updates"]})
         for name, changes in (meta.get("quality_updates") or {}).items():
             self._append("QUALITY_UPDATE", {"entity": name, "changes": changes})
+        player_name = self.state.player.get("name")
+        allowed = set(self.state.npcs)
+        if player_name:
+            allowed.add(player_name)
         for rel in meta.get("relationship_updates") or []:
-            self._append("REL_UPDATE", rel)
+            frm = canon_name(rel.get("from"), player_name)
+            to = canon_name(rel.get("to"), player_name)
+            if not frm or not to:
+                continue
+            if frm not in allowed or to not in allowed:
+                continue
+            self._append("REL_UPDATE", {**rel, "from": frm, "to": to})
         if meta.get("important_event"):
             self._append("IMPORTANT_EVENT", meta["important_event"])
         if meta.get("player_update"):
@@ -496,10 +546,12 @@ class GameSession:
 
     # ================= 章节（阶段 6/7） =================
     async def advance_chapter(self):
-        """章末：主模型一次性生成 章节总结 + 下一章框架。
+        """章末：进入回合锁，先收上一章副作用，再由主模型生成下一章框架。"""
+        async with self._turn_lock:
+            return await self._advance_chapter_locked()
 
-        严格约束：绝不修改任何人物/关系/状态——只产出章节边界事件。
-        """
+    async def _advance_chapter_locked(self):
+        """严格约束：绝不修改任何人物/关系/状态——只产出章节边界事件。"""
         st = self.state
         chapter = st.current_chapter or 1
         # 幂等：下一章已存在则直接返回（断线重试 / 前端重载重复调用安全）。
@@ -508,6 +560,11 @@ class GameSession:
                 summary = st.chapter_ends[-1].get("summary", "") if st.chapter_ends else ""
                 return {"chapter": chapter + 1, "summary": summary,
                         "next_chapter": c.get("frame", {})}
+        # 先收上一章未完成的副作用（WORLD_TICK / CRYSTAL 属于第 1 章末尾），
+        # 确保它们全部落库后再写 CHAPTER_END / CHAPTER，避免跨章事件交叉。
+        await self._drain_side_effects(timeout=90)
+        st = self.state
+        chapter = st.current_chapter or 1
         turns_text = "\n\n".join(
             (f"玩家：{t.get('player_action') or '（开局）'}\n{t.get('narrative') or ''}")
             for t in st.turns

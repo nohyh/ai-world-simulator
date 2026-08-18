@@ -82,7 +82,7 @@ async def test_chapter_advance_uses_main_model_and_keeps_character_state():
         assert s.state.chapters[-1]["frame"]["title"] == "第二章"
         # 规划器绝不改人物/关系状态
         assert s.state.npcs["陈医生"]["status"] == "擦伤了腿"
-        assert s.state.relationships[("陈医生", "主角")]["favor"] == 58
+        assert s.state.relationships[("陈医生", "阿远")]["favor"] == 58
     finally:
         await s.close()
 
@@ -143,3 +143,38 @@ def test_chapter_and_event_prompt_blocks():
         {"summary": "藏身点被烧", "importance": "minor"}])
     assert "★" in ev and "主角坦白" in ev
     assert prompts.events_block([]) == ""
+
+
+@pytest.mark.asyncio
+async def test_chapter_opener_generated_when_current_chapter_has_no_turns():
+    """当前章无回合 → ensure_opening 统一生成本章开篇（第二章/重开后复用）。"""
+    db = Database(":memory:")
+    s = _fresh_session(db)
+    try:
+        s._append("CHAPTER", {"index": 1, "frame": CONFIG["first_chapter"]}, stamp_seq=True)
+        s._commit_turn({"player_action": "开场", "narrative": "n1", "beats": [],
+                        "meta": {"choices": ["a", "b"], "minutes": 5, "place": "P",
+                                 "present": []}})
+        # 切到第二章（模拟 advance 之后）
+        s._append("CHAPTER", {"index": 2, "frame": {
+            "title": "第二章", "time_scope": "夜间", "location_scope": "市郊",
+            "theme": "过夜", "success_condition": "获得落脚点", "failure_condition": "主角死亡"}},
+            stamp_seq=True)
+        assert s.state.current_chapter == 2
+        assert s.state.turns[-1]["chapter"] == 1          # 第二章还没有回合
+
+        # TURN 只存公共 meta（隐藏补丁由独立事件承载）
+        assert "npc_updates" not in s.state.turns[-1]["meta"]
+
+        async for _ in s.ensure_opening():
+            pass
+        assert s.state.turns[-1]["chapter"] == 2          # 生成了第二章开篇
+        assert "npc_updates" not in s.state.turns[-1]["meta"]   # public 化
+        payload = s._history_payload()
+        assert payload["turns"][-1]["chapter"] == 2
+        # 再次调用不再重复生成（当前章已有回合）
+        async for _ in s.ensure_opening():
+            pass
+        assert s.state.turn_count == 2
+    finally:
+        await s.close()

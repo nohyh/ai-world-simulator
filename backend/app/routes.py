@@ -166,6 +166,8 @@ def get_world(wid: str):
         raise HTTPException(404, "世界不存在")
     cfg = dict(w["config"])
     cfg.pop("api_key", None)  # 不回传密钥
+    for k in ("npc_cards", "initial_relationships", "main_plot", "first_chapter"):
+        cfg.pop(k, None)      # 内部世界数据不回传（隐藏状态服务端化）
     return {"id": w["id"], "title": w["title"], "config": cfg,
             "updated_at": w["updated_at"]}
 
@@ -264,7 +266,6 @@ async def chapter_advance(wid: str):
     result = await s.advance_chapter()
     if result is None:
         raise HTTPException(502, "章节规划失败，请重试")
-    await s._drain_side_effects(timeout=30)
     return result
 
 

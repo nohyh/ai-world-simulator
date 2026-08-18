@@ -10,6 +10,18 @@ from . import config as C
 
 _PATCHABLE_NPC_FIELDS = ("status", "personality", "desire", "current_thought")
 
+PLAYER_ALIASES = ("主角", "玩家", "你")
+
+
+def canon_name(name, player_name):
+    """关系端点规范化：别名（主角/玩家/你）→ 玩家标准名；空值返回 None。"""
+    name = str(name or "").strip()
+    if not name:
+        return None
+    if player_name and name in PLAYER_ALIASES:
+        return player_name
+    return name
+
 
 def _npc_state(card):
     return {
@@ -67,19 +79,26 @@ class WorldState:
             self.npcs[name] = _npc_state(card)
         # 有向稀疏关系表：(from, to) -> {"favor": 0..100, "bond": str}
         self.relationships = {}
+        player_name = self.player.get("name")
+        known_npcs = set(self.npcs)
         for rel in config.get("initial_relationships") or []:
-            frm = str(rel.get("from") or "").strip()
-            to = str(rel.get("to") or "").strip()
+            frm = canon_name(rel.get("from"), player_name)
+            to = canon_name(rel.get("to"), player_name)
             if not frm or not to:
                 continue
-            try:
-                favor = max(0, min(100, int(rel.get("favor") or 50)))
-            except (TypeError, ValueError):
+            favor_raw = rel.get("favor")
+            if favor_raw is None:
                 favor = 50
-            self.relationships[(frm, to)] = {
-                "favor": favor,
-                "bond": str(rel.get("bond") or "").strip(),
-            }
+            else:
+                try:
+                    favor = max(0, min(100, int(favor_raw)))
+                except (TypeError, ValueError):
+                    favor = 50
+            if frm in known_npcs or to in known_npcs or player_name in (frm, to):
+                self.relationships[(frm, to)] = {
+                    "favor": favor,
+                    "bond": str(rel.get("bond") or "").strip(),
+                }
         # Only characters the protagonist has encountered belong in the public
         # character view. `present` is emitted by each narrator turn and is the
         # existing witness signal used by the game state.
@@ -158,8 +177,8 @@ class WorldState:
                 if name in self.present:
                     self.seen_npcs.add(name)
         elif etype == "REL_UPDATE":
-            frm = str(data.get("from") or "").strip()
-            to = str(data.get("to") or "").strip()
+            frm = canon_name(data.get("from"), self.player.get("name"))
+            to = canon_name(data.get("to"), self.player.get("name"))
             if not frm or not to:
                 return
             key = (frm, to)

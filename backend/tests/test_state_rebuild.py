@@ -179,7 +179,8 @@ def test_relationship_created_on_first_update_with_default_50():
         ("REL_UPDATE", {"from": "林雨", "to": "主角", "favor_delta": -6,
                         "bond": "合作仍在继续，但已有裂痕", "reason": "主角隐瞒了感染者"}),
     ], CONFIG)
-    rel = st.relationships[("林雨", "主角")]
+    # 「主角」别名归一化为玩家标准名「阿远」
+    rel = st.relationships[("林雨", "阿远")]
     assert rel["favor"] == 44   # 默认 50 + (-6)
     assert rel["bond"] == "合作仍在继续，但已有裂痕"
 
@@ -189,8 +190,8 @@ def test_relationship_is_directed_reverse_edge_distinct():
         ("REL_UPDATE", {"from": "主角", "to": "林雨", "bond": "觉得她可信"}),
         ("REL_UPDATE", {"from": "林雨", "to": "主角", "favor_delta": 10}),
     ], CONFIG)
-    assert st.relationships[("主角", "林雨")]["favor"] == 50
-    assert st.relationships[("林雨", "主角")]["favor"] == 60
+    assert st.relationships[("阿远", "林雨")]["favor"] == 50
+    assert st.relationships[("林雨", "阿远")]["favor"] == 60
     assert len(st.relationships) == 2
 
 
@@ -212,8 +213,16 @@ def test_relationship_seeded_from_initial_config():
         {"from": "林雨", "to": "主角", "favor": 120},
     ]}
     st = WorldState(cfg)
-    assert st.relationships[("陈医生", "主角")] == {"favor": 70, "bond": "欠你一个人情"}
-    assert st.relationships[("林雨", "主角")]["favor"] == 100  # clamp
+    assert st.relationships[("陈医生", "阿远")] == {"favor": 70, "bond": "欠你一个人情"}
+    assert st.relationships[("林雨", "阿远")]["favor"] == 100  # clamp
+
+
+def test_relationship_seeded_favor_zero_is_preserved():
+    # favor=0 不能被 `or 50` 吞掉（极厌恶仍是 0）
+    st = WorldState({"player": {"name": "阿远"}, "npc_cards": [
+        {"name": "陈医生", "identity": "医疗官"}],
+        "initial_relationships": [{"from": "陈医生", "to": "主角", "favor": 0}]})
+    assert st.relationships[("陈医生", "阿远")]["favor"] == 0
 
 
 def test_relationship_context_injects_only_relevant_edges():
@@ -224,9 +233,10 @@ def test_relationship_context_injects_only_relevant_edges():
     ]}
     st = WorldState(cfg)
     ctx = st.relationship_context(["陈医生"])
-    assert "陈医生 → 主角" in ctx
+    # 别名归一：玩家标准名「阿远」；与玩家相关或与陈医生相关的边都会被注入。
+    assert "陈医生 → 阿远" in ctx
     assert "陈医生 → 老周" in ctx
-    assert "老周 → 主角" not in ctx
+    assert "老周 → 阿远" in ctx      # 另一端是玩家（阿远），属相关
     assert "好感 70" in ctx
 
 

@@ -54,11 +54,11 @@ async def main():
         assert "desire" in card and "current_thought" in card and "status" in card and "qualities" in card
         assert "feeling" not in card and "goal" not in card and "secret_plan" not in card
 
-        # 有向关系表（创建时由提取调用生成；开篇补丁再 +2）
-        assert ("陈医生", "主角") in s.state.relationships
-        assert s.state.relationships[("陈医生", "主角")]["favor"] == 72
+        # 有向关系表（创建时由提取调用生成；开篇补丁再 +2；别名归一→玩家「阿远」）
+        assert ("陈医生", "阿远") in s.state.relationships
+        assert s.state.relationships[("陈医生", "阿远")]["favor"] == 72
         ctx = s.state.relationship_context(["陈医生"])
-        assert "陈医生 → 主角" in ctx
+        assert "陈医生 → 阿远" in ctx
 
         for action in ("询问地图的来源", "提议立即出发"):
             seen = []
@@ -72,7 +72,7 @@ async def main():
         # 单作者补丁：Narrator 的 META 补丁同步生效（不再有 npc_mind 二次裁决）
         assert st.npcs["陈医生"]["current_thought"] == "也许该试着信任主角了。"
         assert "队长" in st.npcs                       # new_npcs 建档
-        assert st.relationships[("陈医生", "主角")]["favor"] == 76  # 70 + 2×3 回合
+        assert st.relationships[("陈医生", "阿远")]["favor"] == 76  # 70 + 2×3 回合
         assert len(st.important_events) >= 3
         snap = st.drawer_snapshot()
         assert snap["character"]["player"]["name"] == "阿远"
@@ -88,6 +88,13 @@ async def main():
         assert s3.state.npcs["陈医生"]["current_thought"] == st.npcs["陈医生"]["current_thought"]
         assert s3.state.current_chapter == 1              # 第一章框架来自 mock 提取
         assert s3.state.chapters[0]["frame"]["title"] == "逃离学校"
+        # 隐藏 META 服务端化：history 的 TURN meta 只含公共字段。
+        payload = s3._history_payload()
+        for t in payload["turns"]:
+            assert "npc_updates" not in t["meta"]
+            assert "relationship_updates" not in t["meta"]
+            assert "quality_updates" not in t["meta"]
+            assert "player_update" not in t["meta"]
 
         # 章节边界（阶段 6/7/8，走真实 mock）：达成→规划下一章→本章重开
         s3._commit_turn({"player_action": "离开学校", "narrative": "你终于离开了学校。",

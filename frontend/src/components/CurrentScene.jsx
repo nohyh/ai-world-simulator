@@ -29,12 +29,72 @@ export default function CurrentScene() {
   const abortRef = useRef(null)
   const submittingRef = useRef(false)
   const requestRef = useRef(null)
+  const advancingRef = useRef(false)
+  const decidingRef = useRef(false)
 
   const lastTurn = history?.turns?.[history.turns.length - 1]
   const time = lastTurn?.time_display || ''
   const place = pendingMeta?.place || lastTurn?.meta?.place || ''
 
-  const applyHistory = (payload, { readyForChoice = false } = {}) => {
+  const fetchPlayerStatus = async () => {
+    try {
+      const st = await fetchJson(`/api/game/${worldId}/state`)
+      return st?.character?.player?.status || ''
+    } catch {
+      return ''
+    }
+  }
+
+  const advanceChapter = async () => {
+    if (advancingRef.current) return
+    advancingRef.current = true
+    setAdvancing(true)
+    try {
+      await fetchJson(`/api/game/${worldId}/chapter/advance`, { method: 'POST', body: '{}' })
+      advancingRef.current = false
+      setAdvancing(false)
+      setDeath(false)
+      setEpoch((e) => e + 1)   // 重新装载：当前章无 TURN 时后端 /start 会生成章首
+    } catch (err) {
+      advancingRef.current = false
+      setAdvancing(false)
+      setError(err.message || '章节推进失败')
+    }
+  }
+
+  const restartChapter = async () => {
+    setBusy(true)
+    try {
+      await fetchJson(`/api/game/${worldId}/restart-chapter`, { method: 'POST', body: '{}' })
+      setDeath(false)
+      setEpoch((e) => e + 1)
+    } catch (err) {
+      setError(err.message || '重新开始本章失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 玩家看完最后一个 Beat 并点击“继续”后才做回合终结判定。
+  const handleTurnEnd = async () => {
+    if (decidingRef.current || !serverDone || busy || advancingRef.current) return
+    const last = history?.turns?.[history.turns.length - 1]
+    decidingRef.current = true
+    const status = await fetchPlayerStatus()
+    if (status === '已死亡') {
+      setDeath(true)
+      decidingRef.current = false
+      return
+    }
+    decidingRef.current = false
+    if (last?.meta?.chapter_done?.done) {
+      await advanceChapter()
+      return
+    }
+    setChoiceVisible(true)
+  }
+
+  const applyHistory = (payload) => {
     requestRef.current = null
     setHistory(payload)
     const last = payload?.turns?.[payload.turns.length - 1]
@@ -51,46 +111,11 @@ export default function CurrentScene() {
     setServerDone(true)
     setBusy(false)
     setResumeAtEnd(true)
-    setChoiceVisible(readyForChoice)
+    setChoiceVisible(false)          // 选项延迟到看完最后一幕
+    setDeath(false)
     setRecoveryRequest(null)
     setRoundKey((key) => key + 1)
-    void checkAfterTurn(payload)
     return true
-  }
-
-  // 回合落定后：章节达成则推进下一章；否则检测死亡。
-  const checkAfterTurn = async (payload) => {
-    const last = payload?.turns?.[payload.turns.length - 1]
-    const currentIndex = payload?.chapter?.index
-    if (last?.meta?.chapter_done?.done && currentIndex != null && Number(last.chapter) === Number(currentIndex)) {
-      setAdvancing(true)
-      try {
-        await fetchJson(`/api/game/${worldId}/chapter/advance`, { method: 'POST', body: '{}' })
-        setAdvancing(false)
-        setEpoch((e) => e + 1)
-      } catch (err) {
-        setAdvancing(false)
-        setError(err.message || '章节推进失败')
-      }
-      return
-    }
-    try {
-      const st = await fetchJson(`/api/game/${worldId}/state`)
-      setDeath(st?.character?.player?.status === '已死亡')
-    } catch { /* 静默：只在回合落定后轮询一次 */ }
-  }
-
-  const restartChapter = async () => {
-    setBusy(true)
-    try {
-      await fetchJson(`/api/game/${worldId}/restart-chapter`, { method: 'POST', body: '{}' })
-      setDeath(false)
-      setEpoch((e) => e + 1)
-    } catch (err) {
-      setError(err.message || '重新开始本章失败')
-    } finally {
-      setBusy(false)
-    }
   }
 
   const reconcileFailure = async (message, request) => {
@@ -98,7 +123,7 @@ export default function CurrentScene() {
       const latest = await fetchJson(`/api/game/${worldId}/history`)
       if (requestRef.current !== request) return
       if (turnCount(latest) > request.historyTurnCount) {
-        applyHistory(latest, { readyForChoice: true })
+        applyHistory(latest)
         setError('')
         bumpWorlds()
         return
@@ -146,7 +171,6 @@ export default function CurrentScene() {
             }
           }
           bumpWorlds()
-          if (event.history) void checkAfterTurn(event.history)
         },
         error: (event) => {
           setBusy(false)
@@ -190,8 +214,14 @@ export default function CurrentScene() {
       try {
         const payload = await fetchJson(`/api/game/${worldId}/history`)
         if (cancelled) return
-        if (!applyHistory(payload, { readyForChoice: turnCount(payload) > 0 })) {
+        const last = payload?.turns?.[payload.turns.length - 1]
+        const currentIndex = payload?.chapter?.index
+        // 当前章节还没有任何 TURN（世界首次 / 切章后 / 本章重开后）→ 生成章首。
+        const needsOpener = !last || (currentIndex != null && Number(last.chapter) !== Number(currentIndex))
+        if (!applyHistory(payload)) {
           await runSSE(`/api/game/${worldId}/start`, {}, 0)
+        } else if (needsOpener) {
+          await runSSE(`/api/game/${worldId}/start`, {}, payload.turns?.length || 0)
         }
       } catch (event) {
         if (!cancelled) {
@@ -223,9 +253,7 @@ export default function CurrentScene() {
       return
     }
 
-    // Invalidate the old failure reconciliation before checking again. If the
-    // original request committed just after its first failure, this prevents
-    // retrying the same action and creating a duplicate turn.
+    // Invalidate the old failure reconciliation before checking again.
     requestRef.current = null
     setRecoveryRequest(null)
     setError('')
@@ -233,7 +261,7 @@ export default function CurrentScene() {
     try {
       const latest = await fetchJson(`/api/game/${worldId}/history`)
       if (turnCount(latest) > request.historyTurnCount) {
-        applyHistory(latest, { readyForChoice: true })
+        applyHistory(latest)
         setError('')
         bumpWorlds()
         submittingRef.current = false
@@ -255,7 +283,7 @@ export default function CurrentScene() {
     setRecoveryRequest(null)
     try {
       const payload = await fetchJson(`/api/game/${worldId}/history`)
-      applyHistory(payload, { readyForChoice: turnCount(payload) > 0 })
+      applyHistory(payload)
       setError('')
     } catch (event) {
       setError(event.message || '无法恢复上一回合')
@@ -284,9 +312,9 @@ export default function CurrentScene() {
         <div className="current-content">
           <BeatPlayer key={roundKey} beats={beats} serverDone={serverDone}
             pendingMeta={pendingMeta} loadingDots={loadingDots} resumeAtEnd={resumeAtEnd}
-            enabled={enabled && !choiceVisible && !error && !death}
-            onChoiceReady={() => setChoiceVisible(true)} />
-          {choiceVisible && pendingMeta && !error && !death && (
+            enabled={enabled && !choiceVisible && !error && !death && !advancing}
+            onChoiceReady={handleTurnEnd} />
+          {choiceVisible && pendingMeta && !error && !death && !advancing && (
             <ChoicePanel choices={pendingMeta.choices || []} disabled={busy} onSubmit={submitAction} />
           )}
         </div>

@@ -71,7 +71,7 @@ export default function CharactersTab() {
           <dl className="character-basic">
             <div className="character-basic-item"><dt>身份</dt><dd>{selectedCharacter.role}</dd></div>
             <div className="character-basic-item"><dt>当前状态</dt><dd>{selectedCharacter.state}</dd></div>
-            <div className="character-basic-item"><dt>所在地点</dt><dd>{state.status?.place || '未知地点'}</dd></div>
+            {selectedCharacter.player && <div className="character-basic-item"><dt>所在地点</dt><dd>{state.status?.place || '未知地点'}</dd></div>}
             <div className="character-basic-item"><dt>当前时间</dt><dd>{state.status?.time || '未知时间'}</dd></div>
           </dl>
           {selectedCharacter.player && (

@@ -15,6 +15,17 @@ META_SENTINEL = "[[META]]"
 META_END = "[[END]]"
 DEFAULT_CHOICES = ["观察周围环境", "谨慎采取行动"]
 
+# 允许发给浏览器/写入 TURN 的公共 META 字段；隐藏补丁（npc_updates/
+# relationship_updates/quality_updates/important_event/player_update…）只留在服务端。
+PUBLIC_META_KEYS = ("choices", "minutes", "place", "present", "chapter_done")
+
+
+def public_meta(meta):
+    """SSE / history 只暴露玩家公共 META，隐藏状态绝不外发。"""
+    if not isinstance(meta, dict):
+        return {}
+    return {k: meta[k] for k in PUBLIC_META_KEYS if k in meta}
+
 # ---------------------------------------------------------------- 叙事主调用
 
 NARRATOR_SYSTEM = """你是一个沉浸式中文文字世界模拟引擎的叙事者。你负责推进剧情、扮演世界与所有 NPC，判定玩家行动的实际后果。
@@ -67,7 +78,7 @@ dialogue 必须填写 speaker。speaker 可以是玩家标准名称、【已知 
  "chapter_done": {{"done": false, "reason": ""}}
 }}
 [[END]]
-其中 choices 2~4 个、每个不超过 22 个字，行动导向、风格多样；minutes 为本回合剧情流逝的分钟数；place/present 同前。npc_updates / quality_updates / relationship_updates / important_event / player_update 等全是稀疏补丁：只有本回合确实发生、且值得被记住的状态或关系变化才输出对应字段，没有变化就省略；这就是同一作者顺手记账，不要为了填而填。本回合首次命名且确实会持续存在的角色，用"new_npcs"字段给出其人物卡（姓名/年龄/身份/status/qualities/personality/desire/background/current_thought）。"""
+其中 choices 2~4 个、每个不超过 22 个字，行动导向、风格多样；minutes 为本回合剧情流逝的分钟数；place/present 同前。npc_updates / quality_updates / relationship_updates / important_event / player_update 等全是稀疏补丁：只有本回合确实发生、且值得被记住的状态或关系变化才输出对应字段，没有变化就省略；这就是同一作者顺手记账，不要为了填而填。本回合首次命名且确实会持续存在的角色，用"new_npcs"字段给出其人物卡（姓名/年龄/身份/status/qualities/personality/desire/background/current_thought）。重要：important_event.summary 必须是玩家视角的公开事实——只总结玩家本回合实际经历或获知的信息，绝不得写任何 NPC 未公开的想法、愿望、秘密计划或隐藏的关系数值，因为事件树会用玩家视角展示它。"""
 
 
 def chapter_block(frame):
@@ -90,7 +101,8 @@ def events_block(important_events, budget=C.EVENT_BLOCK_BUDGET_CHARS):
         return ""
     lines = []
     used = 0
-    for ev in important_events:
+    # 从最新往旧装箱（近因优先），装完恢复时间顺序。
+    for ev in reversed(important_events):
         line = ("★ " if ev.get("importance") == "major" else "- ") + (ev.get("summary") or "")
         if used + len(line) + 1 > budget:
             break
@@ -98,7 +110,7 @@ def events_block(important_events, budget=C.EVENT_BLOCK_BUDGET_CHARS):
         used += len(line) + 1
     if not lines:
         return ""
-    return "【重要事件】（本世界值得一提的过去事实）\n" + "\n".join(lines)
+    return "【重要事件】（本世界值得一提的过去事实）\n" + "\n".join(reversed(lines))
 
 
 def narrator_user_message(state_block, chapter_block, memory_block, relationship_block,
@@ -145,7 +157,7 @@ def state_block(player, npcs, time_display, place, present, knowledge_by_npc=Non
                  "\n本回合可以在 Beat 中首次命名新 NPC，命名后后续 Beat 必须保持同名。")
     knowledge_by_npc = knowledge_by_npc or {}
     if present:
-        lines.append("在场 NPC：")
+        lines.append("相关人物（在场或本回合相关）：")
         for name in present:
             n = npcs.get(name)
             if not n:
@@ -252,15 +264,32 @@ NPC_CARDS_SYSTEM = """你是游戏世界构筑器。MOCK:npccards
  },
  "main_plot": "一条 30~60 字的主线：世界正在发生什么、什么在逼近或崩塌"
 }
-要求：姓名使用原文专名；qualities 不规定固定模板，按角色设定生成 3~5 项合理的 0~100 量级数值；desire 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；status 与 current_thought 都要反映开局处境；relationships 只列出开局真正存在或重要的有向关系（通常是与主角之间，或关键 NPC 之间），不建全连矩阵；favor 是 0~100 的亲疏，bond 比数值更重要，用一句话说明关系的本质；first_chapter 用一句话描述开局的时间/地点/主题，success_condition 只写「达成什么即本章结束」（重状态，不重情节步骤）。"""
+要求：姓名使用原文专名；qualities 不规定固定模板，按角色设定生成 3~5 项合理的 0~100 量级数值；desire 是 NPC 自己想要的，不是给玩家的任务；若自由文本为空，则根据世界设定自行创造 2~3 名合理 NPC；status 与 current_thought 都要反映开局处境；relationships 只列出开局真正存在或重要的有向关系（通常是与主角之间，或关键 NPC 之间），不建全连矩阵；favor 是 0~100 的亲疏，bond 比数值更重要，用一句话说明关系的本质；first_chapter 用一句话描述开局的时间/地点/主题，success_condition 只写「达成什么即本章结束」（重状态，不重情节步骤）。关系中的 from/to 必须使用规范化名称：玩家使用上面给定的姓名，NPC 使用各自姓名，禁止写「主角/玩家/你」。"""
 
 
-def npc_cards_user_message(world_setting, important_people):
+def npc_cards_user_message(world_setting, world_rules, current_situation, start_time,
+                           start_place, player, important_people):
+    attrs = "、".join(f"{k} {v}" for k, v in (player.get("attrs") or {}).items())
     return f"""【世界设定】
 {world_setting}
 
+【世界规则】
+{world_rules or '（无特殊规则）'}
+
+【开局处境（玩家此刻的状态，开篇必须从这里开始）】
+{current_situation or '（未提供）'}
+
+【开局时间 / 地点】
+{start_time or '未定'} · {start_place or '未知地点'}
+
+【玩家（角色标准名称，关系/人物引用一律使用该姓名，禁止写作“主角/玩家/你”）】
+姓名：{player.get('name') or '未知'}
+身份：{player.get('identity') or ''}
+背景：{player.get('background') or ''}
+属性：{attrs}
+
 【重要人物/初始关系（自由文本）】
-{important_people or "（未提供，请自行创造）"}"""
+{important_people or '（未提供，请自行创造）'}"""
 
 
 # (NPC 心智更新已并入 Narrator 的单作者 META 状态补丁——阶段 4 删除了 npc_mind)

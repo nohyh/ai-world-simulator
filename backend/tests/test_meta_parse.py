@@ -32,6 +32,24 @@ def test_extract_meta_missing_returns_none():
     assert extract_meta("没有任何结构化块的正文") is None
 
 
+def test_public_meta_strips_hidden_fields():
+    from app.prompts import public_meta
+    full = {
+        "choices": ["a", "b"], "minutes": 10, "place": "P", "present": ["林雨"],
+        "chapter_done": {"done": False, "reason": ""},
+        "npc_updates": {"林雨": {"current_thought": "秘密"}},
+        "relationship_updates": [{"from": "林雨", "to": "主角", "favor_delta": -6,
+                                  "bond": "裂痕"}],
+        "player_update": {"status": "已死亡"},
+    }
+    out = public_meta(full)
+    assert set(out) == {"choices", "minutes", "place", "present", "chapter_done"}
+    assert "npc_updates" not in out and "relationship_updates" not in out
+    assert "player_update" not in out and "quality_updates" not in out
+    assert public_meta(None) == {}
+    assert public_meta({"minutes": 5}) == {"minutes": 5}
+
+
 def test_extract_meta_prose_with_braces():
     from app.prompts import extract_meta
     text = '他笑了笑（{那笑容里有话}）。\n[[META]]\n{"minutes": 1}\n[[END]]'

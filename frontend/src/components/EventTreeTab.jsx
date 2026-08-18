@@ -48,24 +48,24 @@ export default function EventTreeTab() {
     return () => { cancelled = true }
   }, [worldId, tab])
 
-  if (error) return <section className="view page-view"><div className="error">{error}</div></section>
-  if (!data) return <section className="view page-view"><div className="meta">载入世界树……</div></section>
-
-  const turns = data.turns || []
-  const selected = selectedIndex === null ? null : turns[selectedIndex]
+  const turns = data?.turns || []
+  const selected = selectedIndex === null ? null : (turns[selectedIndex] || null)
   const groups = useMemo(() => {
     const out = []
     let current = null
     turns.forEach((t) => {
       const ch = t.chapter || 1
       if (!current || current.chapter !== ch) {
-        current = { chapter: ch, meta: (data.chapters || []).find((c) => c.index === ch) || null, turns: [] }
+        current = { chapter: ch, meta: (data?.chapters || []).find((c) => c.index === ch) || null, turns: [] }
         out.push(current)
       }
       current.turns.push(t)
     })
     return out
   }, [turns, data])
+
+  if (error) return <section className="view page-view"><div className="error">{error}</div></section>
+  if (!data) return <section className="view page-view"><div className="meta">载入世界树……</div></section>
 
   return (
     <section className="view page-view tree-page">
@@ -84,8 +84,9 @@ export default function EventTreeTab() {
                 </div>
                 {groupEvents.length > 0 && <div className="tree-major-events">{groupEvents.map((ev, i) => <span className="chip chip-major" key={`${group.chapter}-${i}`}>★ {ev.summary}</span>)}</div>}
                 {group.turns.map((turn, index) => {
-                  const nextAction = group.turns[index + 1]?.player_action || (turns[groups.indexOf(group) + 1]?.turns?.[0]?.player_action) || ''
                   const globalIndex = turns.indexOf(turn)
+                  // 下一回合 = 全局时间的下一幕（跨章也成立），玩家真正选的路线。
+                  const nextAction = turns[globalIndex + 1]?.player_action || ''
                   const choices = turn.meta?.choices || []
                   const isLatest = globalIndex === turns.length - 1
                   const isSelected = selectedIndex === globalIndex
