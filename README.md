@@ -1,5 +1,3 @@
-<p align="right"><a href="./README.en.md">English</a> | <strong>简体中文</strong></p>
-
 # AI World Simulator · AI 世界模拟器
 
 一个会**持续运行、记忆并推进剧情**的 AI 世界模拟文字游戏引擎。玩家创建世界与角色后，系统会维护 NPC 私有心智、世界状态、长期记忆和事件历史，而不是把体验简化成一个聊天框。
